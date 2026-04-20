@@ -1,0 +1,282 @@
+# manji-standard-server-go
+
+Go + DDD + クリーンアーキテクチャ + Connect RPC のバックエンドプロジェクト。
+
+> [manji-standard-server 系](../manji-standard-server/README.md) の **Go 参照実装**。基盤の skill / subagent / [アーキテクチャパターン](../manji-standard-server/docs/patterns/README.md)（proto 駆動 DDD / `mss-protoc-gen` / インフラ差し替え）に準拠。
+> 姉妹実装: [Hono 版](../manji-standard-server-ts-hono/) / [Next.js 版](../manji-standard-server-ts-next/)
+
+## セットアップ
+
+```bash
+make install-tools   # buf + protoc プラグインをインストール
+make proto-gen       # proto からコード生成
+go mod tidy          # 依存解決
+make run             # ローカル起動（:8080）
+```
+
+## エンドポイント（Connect RPC）
+
+Connect プロトコルは `POST /{package}.{service}/{method}` で、JSON / Protobuf / gRPC のいずれでも呼べます。
+
+```bash
+# ユーザー作成（JSON over Connect）
+curl -X POST http://localhost:8080/user.v1.UserService/CreateUser \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@example.com","name":"Alice"}'
+
+# ユーザー取得
+curl -X POST http://localhost:8080/user.v1.UserService/GetUser \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"<uuid>"}'
+
+# ヘルスチェック（通常の GET）
+curl http://localhost:8080/health
+```
+
+## Docker
+
+```bash
+make docker-up       # api + postgres を起動
+make docker-down     # 停止
+```
+
+## ユースケース別ガイド
+
+「〜したい時」に辿るフロー。Claude Code で作業する際は各セクションの **skill / subagent** を呼ぶと自動で対応する手順に入る。
+
+### 仕様を書きたい
+
+新機能の仕様書を `docs/spec/` に作成する。実装詳細（コード・API エンドポイント）は書かず、目的・ルール・境界のみ。
+
+- Skill: **`backend-spec-creator`**（「仕様書作って」「spec 書いて」）
+- 出力先: `docs/spec/<feature-name>-spec.md`
+- 仕様書にはルール ID（R-01, R-02...）を振り、テスト・実装から参照可能にする
+
+### 実装計画を立てたい
+
+仕様書を元に実装の進め方を決める。
+
+- Skill: **`backend-work-planner`**（「実装計画立てて」「work 書いて」）
+- 出力先: `docs/work/YYYYMMDD_<feature>.md`
+- Phase 分解・並列化計画・テスト戦略・リスクを含む
+
+### 新しいエンティティを追加したい
+
+User のような新ドメイン概念（例: `Order`）を追加する。
+
+1. `proto/order/v1/order.proto` を作成し、`// @entity` マーカー付きで定義
+   ```proto
+   // @entity
+   message Order {
+     // @pk
+     string id = 1;
+     // @unique
+     string order_number = 2;
+     // @timestamp
+     int64 created_at_unix = 3;
+   }
+   ```
+2. `make proto-gen` を実行 → `entity/order.gen.go`、`repository/order_repository.gen.go`、`infra/repository/order_repository.gen.go` が生成
+3. `pkg/domain/service/order_service.go` を手書き（ビジネスルール）
+4. `pkg/usecase/order_usecase.go` を手書き（トランザクション境界）
+5. `pkg/handler/order_handler.go` を手書き（`userv1connect.OrderServiceHandler` 実装）
+6. `cmd/api/main.go` でワイヤリング追加
+
+### 既存エンティティにフィールドを追加したい
+
+User に `phone_number` を追加するケース。
+
+1. `proto/user/v1/user.proto` にフィールド追加（必要なら `// @required` 等のマーカー）
+2. `make proto-gen` で `user.gen.go` が再生成 → ファクトリ `NewUser` のシグネチャが変わる
+3. **コンパイルエラー** で影響範囲（Service / Handler）が特定される
+4. エラーが出た箇所を最小差分で更新
+
+### 新しい RPC メソッドを追加したい
+
+`UserService` に `UpdateUser` を追加するケース。
+
+1. `proto/user/v1/user.proto` の `service` ブロックに `rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);` を追加
+2. `make proto-gen` → `userv1connect.UserServiceHandler` interface にメソッド追加
+3. `pkg/handler/user_handler.go` に `UpdateUser` メソッドを実装（実装しないとコンパイルエラー）
+4. 必要に応じて UseCase / Service にメソッド追加
+
+### InMemory から PostgreSQL に切り替えたい
+
+「インフラ層の差し替え」セクションを参照。要点:
+
+1. `pkg/infra/repository/user_postgres_repository.go`（`.gen.go` ではない通常ファイル）を手書き
+2. `cmd/api/main.go` で `NewInMemoryUserRepository()` → `NewPostgresUserRepository(db)` に差し替え
+3. Service / UseCase / Handler は **一切変更不要**
+
+### バグを調査したい
+
+場当たり的に修正せず、仮説駆動で進める。
+
+- Skill: **`backend-debug-session`**（「バグ調査して」「デバッグ手伝って」）
+- 再現 → 仮説 3 つ出す → 検証 → 再発防止テストを先に書く → 修正 の順
+
+### コードレビューを依頼したい
+
+- Skill: **`backend-code-reviewer`**（「レビューして」）
+- Subagent: **`backend-reviewer`**（並列委託したいとき）
+- must / should / nit の 3 段階で指摘が返る。修正自体は別途 `backend-worker` に委託
+
+### リファクタしたい
+
+コードを触る前に影響範囲を洗い出す。
+
+- Skill: **`backend-refactor-planner`**（「リファクタ計画立てて」）
+- Parallel Change / Strangler Fig / In-place の戦略選定込み
+
+### コミット分割・PR を作りたい
+
+- Skill: **`backend-commit-splitter`**（「コミット分けて」）— 自動生成物と手書きを別コミットに分離
+- Skill: **`backend-pr-describer`**（「PR 説明書いて」）— Summary / Changes / Test plan / Risk を構造化
+
+### 考えがまとまらない（壁打ち）
+
+- Skill: **`backend-rubber-duck`**（「壁打ちして」「一緒に考えて」）
+- 答えを出さず問い返しで思考を整理する
+
+### 開発全体をオーケストレートしたい
+
+仕様〜実装〜PR 作成まで一気通貫で進めたい場合。
+
+- Skill: **`backend-dev-manager`**（「開発進めて」）
+- Phase 0-N に自動分解 + 各 Phase を subagent に委託
+
+## Skills / Subagents
+
+このプロジェクトには `.claude/skills/` と `.claude/agents/` が配置済みです。
+
+- `.claude/skills/` — 14 個の skill（`backend-spec-creator` ～ `backend-pr-describer` など）
+- `.claude/agents/` — 8 個の subagent（`backend-worker` / `backend-reviewer` / `backend-designer` など）
+
+Claude Code を起動すると自動で認識されます。スキル一覧は:
+
+```bash
+ls .claude/skills/
+ls .claude/agents/
+```
+
+## レイヤー構成（青色が自動生成、白色が手書き）
+
+```
+proto/user/v1/user.proto  ← 唯一の手書き source
+     │
+     └─ buf generate
+         │
+         ├→ gen/user/v1/user.pb.go              [gen] (protoc-gen-go)
+         ├→ gen/user/v1/userv1connect/user.connect.go [gen] (protoc-gen-connect-go)
+         ├→ pkg/domain/entity/user.gen.go       [gen] (mss-protoc-gen)
+         ├→ pkg/domain/repository/user_repository.gen.go [gen]
+         └→ pkg/infra/repository/user_repository.gen.go  [gen]
+
+Handler (pkg/handler/user_handler.go)            ← 手書き（connect.Handler 実装）
+  ↓
+UseCase (pkg/usecase/user_usecase.go)            ← 手書き
+  ↓
+Service (pkg/domain/service/user_service.go)     ← 手書き（ビジネスロジック）
+  ↓
+Repository interface (生成)
+  ↑ 実装
+Infra InMemory Repository (生成)
+  ↓
+Entity (生成)
+```
+
+Connect RPC リクエストは上から順に通り、最終的に `entity.User` として永続化されます。
+
+## インフラ層の差し替え（InMemory → PostgreSQL / MySQL 等）
+
+現在の Repository 実装は proto から生成された **InMemory 版**（`pkg/infra/repository/*_repository.gen.go`）です。
+開発・テスト用途のデフォルトで、そのまま本番には使えません。docker-compose に同梱されている PostgreSQL などに差し替える手順:
+
+### なぜ差し替えが容易か
+
+- Repository **interface** は `pkg/domain/repository/*.gen.go` として自動生成され、ドメイン層（Service）はこれにのみ依存する
+- InMemory 実装も PostgreSQL 実装も、同じ interface を満たす別々の具象クラス
+- `cmd/api/main.go`（DI ワイヤリング）で差し替えるだけで、Service / UseCase / Handler は一切変更不要
+
+### 手順
+
+**1. 新しい Repository 実装を手書きで追加**（`*.gen.go` ではなく通常の `.go` ファイル）
+
+```go
+// pkg/infra/repository/user_postgres_repository.go
+package repository
+
+import (
+    "context"
+    "database/sql"
+
+    "github.com/example/manji-standard-server-go/pkg/domain/entity"
+    "github.com/example/manji-standard-server-go/pkg/domain/repository"
+)
+
+type postgresUserRepository struct {
+    db *sql.DB
+}
+
+func NewPostgresUserRepository(db *sql.DB) repository.UserRepository {
+    return &postgresUserRepository{db: db}
+}
+
+func (r *postgresUserRepository) Save(ctx context.Context, u *entity.User) error {
+    _, err := r.db.ExecContext(ctx,
+        `INSERT INTO users (id, email, name, created_at) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
+        u.ID, u.Email, u.Name, u.CreatedAt)
+    return err
+}
+
+func (r *postgresUserRepository) FindByID(ctx context.Context, id string) (*entity.User, error) {
+    // SELECT id, email, name, created_at FROM users WHERE id = $1
+    // ...
+}
+
+func (r *postgresUserRepository) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
+    // SELECT id, email, name, created_at FROM users WHERE email = $1
+    // ...
+}
+```
+
+**2. `cmd/api/main.go` で切り替え**
+
+```go
+// Before (InMemory、生成物)
+userRepo := infrarepo.NewInMemoryUserRepository()
+
+// After (PostgreSQL、手書き)
+db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
+if err != nil { log.Fatal(err) }
+userRepo := infrarepo.NewPostgresUserRepository(db)
+```
+
+**3. 依存ドライバを追加**
+
+```bash
+go get github.com/jackc/pgx/v5/stdlib  # or github.com/lib/pq
+```
+
+**4. Service / UseCase / Handler は変更不要**
+
+Repository interface が抽象化してくれるため、実装差し替えはドメイン層まで波及しない。
+
+### 併用パターン（推奨）
+
+- **本番・ステージング**: PostgreSQL 実装
+- **ユニットテスト**: 生成された InMemory 実装（`NewInMemoryUserRepository()` のまま）
+- **結合テスト**: testcontainers で起動した一時 PostgreSQL
+
+DI 切り替えは環境変数で行う:
+
+```go
+var userRepo repository.UserRepository
+if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+    db, _ := sql.Open("postgres", dsn)
+    userRepo = infrarepo.NewPostgresUserRepository(db)
+} else {
+    userRepo = infrarepo.NewInMemoryUserRepository()
+}
+```
