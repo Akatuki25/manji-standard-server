@@ -1,6 +1,6 @@
 # manji-standard-server-ts-hono
 
-TypeScript + Hono + DDD + Connect RPC のバックエンドプロジェクト。
+TypeScript + Hono + DDD + REST のバックエンドプロジェクト。
 
 > [manji-standard-server 系](../manji-standard-server/README.md) の **Hono 参照実装**。基盤の skill / subagent / [アーキテクチャパターン](../manji-standard-server/docs/patterns/README.md)（proto 駆動 DDD / `mss-protoc-gen` / インフラ差し替え）に準拠。
 > 姉妹実装: [Go 版](../manji-standard-server-go/) / [Next.js 版](../manji-standard-server-ts-next/)
@@ -15,20 +15,20 @@ npm run dev            # tsx watch で起動（:8080）
 npm run build && npm start
 ```
 
-## エンドポイント（Connect RPC）
+## エンドポイント (REST)
+
+URL は proto の rpc 毎に `@http METHOD /path` アノテーションで宣言済み。生成物の `src/lib/handler-registry.gen.ts` が Hono に登録する。
 
 ```bash
 # ユーザー作成
-curl -X POST http://localhost:8080/user.v1.UserService/CreateUser \
+curl -X POST http://localhost:8080/api/users \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","name":"Alice"}'
 
 # ユーザー取得
-curl -X POST http://localhost:8080/user.v1.UserService/GetUser \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"<uuid>"}'
+curl http://localhost:8080/api/users/<uuid>
 
-# ヘルスチェック（Hono REST）
+# ヘルスチェック
 curl http://localhost:8080/health
 ```
 
@@ -72,11 +72,11 @@ User のような新ドメイン概念（例: `Order`）を追加する。
      int64 created_at_unix = 3;
    }
    ```
-2. `npm run proto:gen`（または `make proto-gen`）→ `src/domain/entity/order.gen.ts`・`src/domain/repository/order-repository.gen.ts`・`src/infra/repository/in-memory-order-repository.gen.ts` が生成
-3. `src/domain/service/order-service.ts` を手書き（ビジネスルール）
-4. `src/usecase/order-usecase.ts` を手書き（トランザクション境界）
-5. `src/handler/order-handler.ts` を手書き（`ServiceImpl<typeof OrderService>` を返す関数）
-6. `src/main.ts` で `router.service(OrderService, createOrderServiceImpl(...))` を追加
+2. `proto` の `service` に rpc を定義し、各 rpc に `// @http METHOD /path` を付ける
+3. `npm run proto:gen`(または `make proto-gen`) → entity / repository / mock / postgres 実装 / Usecase interface / REST Handler / handler-registry がすべて生成
+4. `src/domain/service/order-service.ts` を手書き(ビジネスルール)
+5. `src/usecase/order-usecase.ts` を手書き(生成された interface を実装するだけ)
+6. `src/main.ts` は既に `registerHandlers(app, deps)` を呼んでいるので追加作業なし
 
 ### 既存エンティティにフィールドを追加したい
 
@@ -87,22 +87,25 @@ User に `phoneNumber` を追加するケース。
 3. **コンパイルエラー** で影響範囲（Service / Handler の toPb など）が特定される
 4. エラー箇所を最小差分で更新
 
-### 新しい RPC メソッドを追加したい
+### 新しい RPC メソッド(REST エンドポイント)を追加したい
 
 `UserService` に `updateUser` を追加するケース。
 
-1. `proto/user/v1/user.proto` の `service` に `rpc UpdateUser(...) returns (...);` を追加
-2. `npm run proto:gen` → `user_connect.ts` の `UserService` に method が追加される
-3. `src/handler/user-handler.ts` の `createUserServiceImpl` 返却オブジェクトに `updateUser` を追加
-4. 必要に応じて UseCase / Service にメソッド追加
+1. `proto/user/v1/user.proto` の `service` に rpc を追加、`// @http PUT /api/users/{id}` を付ける
+2. `npm run proto:gen` → Usecase interface にメソッドが足され、生成 Handler と registry にエンドポイントが追加される
+3. `src/usecase/user-usecase.ts`(手書き)に Usecase interface の新メソッドを実装
+4. 必要に応じて Service にメソッド追加
 
-### InMemory から PostgreSQL に切り替えたい
+### PostgreSQL から別 DB（MySQL / Redis / MongoDB）へ移管したい
 
-下部「インフラ層の差し替え」セクションを参照。要点:
+永続化は PostgreSQL 単一実装（mss-protoc-gen で生成）が既定。別 DB への移管は「生成テンプレートと CLAUDE.md の書き換え」で行う。
 
-1. `src/infra/repository/postgres-user-repository.ts`（`.gen.ts` ではない通常ファイル）を手書き
-2. `src/main.ts` で `new InMemoryUserRepository()` → `new PostgresUserRepository(pool)` に差し替え
-3. Service / UseCase / Handler は **一切変更不要**
+1. `CLAUDE.md` の「技術スタック > データストア」欄を更新
+2. `tools/mss-protoc-gen/generator/infra_postgres_repository/` をフォークして ORM / ドライバ / 型マッピングを差し替え
+3. ドライバ依存を入れ替え（`npm install mysql2` / `ioredis` / `mongodb` 等）
+4. `npm run proto:gen` → コンパイルエラー箇所（`src/main.ts` の DI など）を追従
+
+詳細は [`../manji-standard-server/README.md` の「対象 DB / 自動生成対象の変更方法」](../manji-standard-server/README.md#対象-db--自動生成対象の変更方法) と [`infra-swap.md`](../manji-standard-server/docs/patterns/infra-swap.md) を参照。
 
 ### バグを調査したい
 
@@ -141,125 +144,52 @@ proto/user/v1/user.proto  ← 唯一の手書き source
    │
    └─ make proto-gen (buf generate)
       │
-      ├→ src/gen/user/v1/user_pb.ts              [protoc-gen-es]
-      ├→ src/gen/user/v1/user_connect.ts         [protoc-gen-connect-es]
-      ├→ src/domain/entity/user.gen.ts           [mss-protoc-gen]
+      ├→ src/domain/entity/user.gen.ts                    [mss-protoc-gen]
       ├→ src/domain/repository/user-repository.gen.ts
-      └→ src/infra/repository/in-memory-user-repository.gen.ts
+      ├→ src/domain/repository/mock/mock-user-repository.gen.ts
+      ├→ src/infra/repository/user-postgres-repository.gen.ts
+      ├→ src/usecase/user-usecase-interface.gen.ts        (interface + Input 型)
+      ├→ src/handler/user-handler.gen.ts                  (REST Handler クラス、Hono Context 受け取り)
+      └→ src/lib/handler-registry.gen.ts                  (registerHandlers + HandlerDeps)
 
-Handler (src/handler/user-handler.ts)      ← 手書き（ServiceImpl）
-  ↓
-UseCase (src/usecase/user-usecase.ts)      ← 手書き
-  ↓
-Service (src/domain/service/user-service.ts) ← 手書き（ビジネスロジック）
-  ↓
-Repository interface (生成)
-  ↑ 実装
-InMemory Repository (生成)
-  ↓
-Entity (生成)
+REST Handler (生成) → Usecase interface (生成)
+                          ↑ implements
+                      UserUsecaseImpl (手書き) → Service (手書き) → Repository (生成) → Entity (生成)
+                                                                        ↑
+                                                             Postgres Repository (生成)
 ```
 
-Connect RPC リクエストはこの順序で通り、`User.create()` ファクトリで検証後に永続化されます。
-Hono は `/health` などの REST エンドポイントを担当（Connect のフォールバックとして動作）。
+HTTP リクエストは Hono が routing → 生成 Handler が JSON を parse → Usecase 実装 → Entity を `User.create()` または `User.hydrate()` で取得 → JSON で返却、の流れで通ります。
 
-## インフラ層の差し替え（InMemory → PostgreSQL / MySQL 等）
+## インフラ層の構成（Postgres 単一実装）
 
-現在の Repository 実装は proto から生成された **InMemory 版**（`src/infra/repository/in-memory-*-repository.gen.ts`）です。
-開発・テスト用途のデフォルトで、そのまま本番には使えません。docker-compose 同梱の PostgreSQL 等に差し替える手順:
+Repository の本番実装は proto から生成された **PostgreSQL 版**（`src/infra/repository/*-postgres-repository.gen.ts`）に統一しています。InMemory 実装は採用しません。
 
-### なぜ差し替えが容易か
+- **ユニットテスト**: 生成された Mock（`src/domain/repository/mock/`）を Service / UseCase のテストに注入
+- **結合テスト**: docker-compose または testcontainers の PostgreSQL に `new PostgresUserRepository(client)` で接続
+- **本番**: 同じ `new PostgresUserRepository(client)`。接続情報は環境変数
 
-- Repository **interface** は `src/domain/repository/*-repository.gen.ts` として自動生成され、ドメイン層（Service）はこれにのみ依存する
-- InMemory 実装も PostgreSQL 実装も、同じ interface を `implements` する別クラス
-- `src/main.ts`（DI ワイヤリング）で差し替えるだけで、Service / UseCase / Handler は一切変更不要
-
-### 手順
-
-**1. 新しい Repository 実装を手書きで追加**（`*.gen.ts` ではなく通常の `.ts` ファイル）
+### 配線例（`src/main.ts`）
 
 ```ts
-// src/infra/repository/postgres-user-repository.ts
-import type { Pool } from "pg";
-import { User } from "../../domain/entity/user.gen.js";
-import type { UserRepository } from "../../domain/repository/user-repository.gen.js";
-
-export class PostgresUserRepository implements UserRepository {
-  constructor(private readonly pool: Pool) {}
-
-  async save(user: User): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO users (id, email, name, created_at) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
-      [user.id, user.email, user.name, user.createdAt],
-    );
-  }
-
-  async findById(id: string): Promise<User | null> {
-    const { rows } = await this.pool.query(
-      `SELECT id, email, name, created_at FROM users WHERE id = $1`,
-      [id],
-    );
-    if (rows.length === 0) return null;
-    return User.create({
-      id: rows[0].id,
-      email: rows[0].email,
-      name: rows[0].name,
-      createdAt: rows[0].created_at,
-    });
-  }
-
-  async findByEmail(email: string): Promise<User | null> {
-    // SELECT ... WHERE email = $1
-    // ...
-  }
-}
+import { PostgresUserRepository } from "./infra/repository/user-postgres-repository.gen.js";
+// ORM クライアント（Drizzle / TypeORM）を DATABASE_URL から初期化
+const userRepo = new PostgresUserRepository(client);
 ```
 
-**2. `src/main.ts` で切り替え**
+### 別 DB（MySQL / Redis / MongoDB）へ移管する場合
 
-```ts
-// Before (InMemory、生成物)
-import { InMemoryUserRepository } from "./infra/repository/in-memory-user-repository.gen.js";
-const userRepo = new InMemoryUserRepository();
+CLAUDE.md の「データストア」欄と `tools/mss-protoc-gen/generator/infra_postgres_repository/` のテンプレートを書き換えて `npm run proto:gen` で再生成する。ランタイムの DI 切り替えではなく、**テンプレート差し替え + 再生成** が切り替え手段。
 
-// After (PostgreSQL、手書き)
-import { Pool } from "pg";
-import { PostgresUserRepository } from "./infra/repository/postgres-user-repository.js";
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const userRepo = new PostgresUserRepository(pool);
-```
-
-**3. 依存ドライバを追加**
-
-```bash
-npm install pg
-npm install -D @types/pg
-```
-
-**4. Service / UseCase / Handler は変更不要**
-
-Repository interface が抽象化してくれるため、実装差し替えはドメイン層まで波及しない。
-
-### 併用パターン（推奨）
-
-- **本番・ステージング**: PostgreSQL 実装
-- **ユニットテスト**: 生成された InMemory 実装（`new InMemoryUserRepository()` のまま）
-- **結合テスト**: testcontainers / pg-mem で起動した一時 PostgreSQL
-
-DI 切り替えは環境変数で行う:
-
-```ts
-const userRepo: UserRepository = process.env.DATABASE_URL
-  ? new PostgresUserRepository(new Pool({ connectionString: process.env.DATABASE_URL }))
-  : new InMemoryUserRepository();
-```
+詳細は:
+- [`../manji-standard-server/README.md#対象-db--自動生成対象の変更方法`](../manji-standard-server/README.md#対象-db--自動生成対象の変更方法)
+- [`../manji-standard-server/docs/patterns/infra-swap.md`](../manji-standard-server/docs/patterns/infra-swap.md)
 
 ## Skills / Subagents
 
 このプロジェクトには `.claude/skills/` と `.claude/agents/` が直接配置済みです。
 
-- `.claude/skills/` — 14 個の skill
+- `.claude/skills/` — 15 個の skill
 - `.claude/agents/` — 8 個の subagent
 
 Claude Code 起動時に自動認識されます。

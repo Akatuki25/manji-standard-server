@@ -1,0 +1,38 @@
+name: fmt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go.sum
+
+      - name: Install protoc plugins and buf
+        run: make install-tools
+
+      - name: Run proto-gen
+        # 生成物も gofmt チェック対象。proto-gen 後の末尾 gofmt で揃えている前提。
+        run: make proto-gen
+
+      - name: gofmt check
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "::error::gofmt failures in the following files:"
+            echo "$fmt_out"
+            echo ""
+            echo "Run 'gofmt -w .' locally and commit."
+            exit 1
+          fi

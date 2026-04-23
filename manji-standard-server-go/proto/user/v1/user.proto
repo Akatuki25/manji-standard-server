@@ -34,6 +34,9 @@ message GetUserResponse {
 }
 
 service UserService {
+  // @http POST /api/users
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // @http GET /api/users/{id}
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
 }

@@ -1,0 +1,49 @@
+name: unit-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go.sum
+
+      - name: Install protoc plugins and buf
+        run: make install-tools
+
+      - name: Regenerate proto and check for drift
+        run: |
+          make proto-gen
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::proto generation is out of date. Run 'make proto-gen' locally and commit the result."
+            git status
+            git --no-pager diff
+            exit 1
+          fi
+
+      - name: go mod tidy check
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+            echo "::error::go.mod / go.sum is out of date. Run 'go mod tidy' locally and commit."
+            git --no-pager diff go.mod go.sum
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Unit test (skip integration-tagged tests)
+        # integration テストは build tag `integration` で分離されているためここでは走らない。
+        run: go test ./...

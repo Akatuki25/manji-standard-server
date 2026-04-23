@@ -4,12 +4,24 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/example/manji-standard-server-go/pkg/domain/entity"
 )
 
+var ErrUserNotFound = errors.New("user not found")
+var ErrUserAlreadyExists = errors.New("user already exists")
+
 type UserRepository interface {
-	Save(ctx context.Context, u *entity.User) error
-	FindByID(ctx context.Context, id string) (*entity.User, error)
-	FindByEmail(ctx context.Context, email string) (*entity.User, error)
+	SelectAll(ctx context.Context) ([]*entity.User, error)
+	SelectByPK(ctx context.Context, id string) (*entity.User, error)
+	SelectByEmail(ctx context.Context, email string) (*entity.User, error)
+	Insert(ctx context.Context, user *entity.User) error
+	BulkInsert(ctx context.Context, users []*entity.User) error
+	Upsert(ctx context.Context, user *entity.User) error
+	BulkUpsert(ctx context.Context, users []*entity.User) error
+	Update(ctx context.Context, user *entity.User) error
+	Delete(ctx context.Context, id string) error
+	BulkDelete(ctx context.Context, ids []string) error
+	DeleteAll(ctx context.Context) error
 }

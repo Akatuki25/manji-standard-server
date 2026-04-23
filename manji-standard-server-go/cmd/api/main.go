@@ -5,23 +5,37 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/example/manji-standard-server-go/gen/user/v1/userv1connect"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+
+	"github.com/example/manji-standard-server-go/pkg/di"
 	"github.com/example/manji-standard-server-go/pkg/domain/service"
-	"github.com/example/manji-standard-server-go/pkg/handler"
 	infrarepo "github.com/example/manji-standard-server-go/pkg/infra/repository"
 	"github.com/example/manji-standard-server-go/pkg/usecase"
 )
 
 func main() {
-	userRepo := infrarepo.NewInMemoryUserRepository()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is required (example: postgres://user:pass@localhost:5432/app?sslmode=disable)")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
+	if err != nil {
+		log.Fatalf("connect db: %v", err)
+	}
+	if err := infrarepo.AutoMigrateUser(db); err != nil {
+		log.Fatalf("auto-migrate: %v", err)
+	}
+
+	userRepo := infrarepo.NewPostgresUserRepository(db)
 	userService := service.NewUserService(userRepo, nil)
 	userUsecase := usecase.NewUserUsecase(userService)
-	userHandler := handler.NewUserHandler(userUsecase)
+
+	handlers := di.NewHandlers(userUsecase)
 
 	mux := http.NewServeMux()
-	path, connectHandler := userv1connect.NewUserServiceHandler(userHandler)
-	mux.Handle(path, connectHandler)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+	handlers.Register(mux)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -30,7 +44,7 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	log.Printf("listening on %s (Connect RPC: %s)", addr, path)
+	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}

@@ -40,4 +40,20 @@ func NewUser(
 	}, nil
 }
 
+// HydrateUser は永続化層から復元した値で User を組み立てる。
+// バリデーションは走らない。通常コードパスでは NewUser を使うこと。
+func HydrateUser(
+	id string,
+	email string,
+	name string,
+	createdAt time.Time,
+) *User {
+	return &User{
+		ID:        id,
+		Email:     email,
+		Name:      name,
+		CreatedAt: createdAt,
+	}
+}
+
 var _ = time.Time{}

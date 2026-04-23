@@ -7,20 +7,38 @@ Claude Code で動くバックエンド開発の標準基盤。DDD + クリー�
 | 種別 | ディレクトリ | 概要 |
 | --- | --- | --- |
 | **基盤（本リポ）** | [`manji-standard-server/`](./) | 汎用 skill / agent / パターン集。全メンバーの思想的中心 |
-| Go 参照実装 | [`../manji-standard-server-go/`](../manji-standard-server-go/) | Go 1.22 + Connect RPC + Proto 駆動 DDD + カスタム `mss-protoc-gen` |
-| Hono 参照実装 | [`../manji-standard-server-ts-hono/`](../manji-standard-server-ts-hono/) | TypeScript + Hono v4 + Connect RPC + Proto 駆動 DDD |
-| Next.js 参照実装 | [`../manji-standard-server-ts-next/`](../manji-standard-server-ts-next/) | Next.js 14 (App Router) + REST API + DDD（proto 不使用） |
+| Go 参照実装 | [`../manji-standard-server-go/`](../manji-standard-server-go/) | Go 1.22 + `net/http` + REST + Proto 駆動 DDD + カスタム `mss-protoc-gen` |
+| Hono 参照実装 | [`../manji-standard-server-ts-hono/`](../manji-standard-server-ts-hono/) | TypeScript + Hono v4 + REST + Proto 駆動 DDD |
+| Next.js 参照実装 | [`../manji-standard-server-ts-next/`](../manji-standard-server-ts-next/) | Next.js 14 (App Router) + REST + Proto 駆動 DDD |
 
 新しいプロジェクトを作るときはどれかの実装を元に fork するか、このベースディレクトリの skill / agent / パターンを取り込んで独自構成を組む。
+
+## 3 実装の構造比較
+
+| | Go | Hono | Next |
+| --- | --- | --- | --- |
+| proto 駆動 DDD | ✅ | ✅ | ✅ |
+| mss-protoc-gen | ✅ | ✅ | ✅ |
+| Entity / Repo interface / Mock / Postgres 実装を生成 | ✅ | ✅ | ✅ |
+| Usecase interface + Input 型を生成 | ✅ | ✅ | ✅ |
+| API スタイル | **REST** | **REST** | **REST** |
+| URL ルーティング指定 | `@http METHOD /path` | 同左 | 同左 |
+| REST Handler 実装を生成 | ✅ (`net/http`) | ✅ (Hono `Context`) | ✅ (Next Route Handler) |
+| DI 配線を生成 | ✅ (`Handlers` struct + `Register(mux)`) | ✅ (`registerHandlers(app, deps)`) | ✅ (`handler-registry` 遅延 factory) |
+| 外部 DI フレームワーク | 不使用 | 不使用 | 不使用 |
+
+**手書きに残るのは 3 実装とも Service + Usecase 実装 + DI ワイヤリング数行のみ**。ドメイン層・ユースケース層 interface・REST Handler・ルーティング登録は全て proto から生成される。
+
+違うのは HTTP フレームワークだけ — Go は `net/http`(Go 1.22+ の `"METHOD /path/{param}"` パターン)、Hono は `app.get` / `app.post`、Next は App Router の `route.ts`。どれも JSON over HTTP の REST。
 
 ## どの実装を選ぶか
 
 | こういう時は | 推奨 | 理由 |
 | --- | --- | --- |
-| 高性能・型安全なバックエンド API を作る | `manji-standard-server-go` | Go の静的型 + Connect RPC、Proto 駆動で大量エンティティを高速実装 |
-| Node エコシステムでバックエンド API を作る | `manji-standard-server-ts-hono` | npm 資産 + TypeScript + Connect RPC。Go と同等の proto 駆動体験 |
+| 高性能・型安全なバックエンド API を作る | `manji-standard-server-go` | Go 静的型 + `net/http` の REST、proto 駆動で大量エンティティを高速実装 |
+| Node エコシステムでバックエンド API を作る | `manji-standard-server-ts-hono` | npm 資産 + TypeScript + Hono、proto 駆動で Go と同等の体験 |
 | フロントエンドも同一リポで管理したい | `manji-standard-server-ts-next` | Next.js App Router で UI + API を同居。SSR / ISR が必要な場合 |
-| API / クライアントを明確に分けたい | Hono（API） + Next（UI） を別デプロイ | Connect-ES クライアントで型共有可能 |
+| API / クライアントを明確に分けたい | Hono(API) + Next(UI) を別デプロイ | どちらも素の REST なのでクライアント間で仕様を共有しやすい |
 
 ## 使い方（ユースケース別）
 
@@ -61,7 +79,7 @@ skill / 実装を取り込まなくても、概念だけ取り入れられる。
 
 ## このディレクトリの内容
 
-- [`skills/`](./skills/) — Claude Code で会話中に呼び出すワークフロースキル（14 本）
+- [`skills/`](./skills/) — Claude Code で会話中に呼び出すワークフロースキル（15 本）
 - [`agents/`](./agents/) — `Task` tool で並列委託できる subagent（8 本）
 - [`docs/patterns/`](./docs/patterns/) — **バックエンドアーキテクチャ推奨パターン**
 - [`Makefile`](./Makefile) — 別プロジェクトへ `.claude/` を配置するための管理ターゲット
@@ -72,11 +90,67 @@ manji-standard-server 系が推奨するバックエンドアーキテクチャ�
 
 | パターン | 要点 |
 | --- | --- |
-| [Proto 駆動 DDD](./docs/patterns/proto-driven-ddd.md) | `.proto` を唯一のソースとし、Entity / Repository / InMemory 実装を自動生成する |
+| [Proto 駆動 DDD](./docs/patterns/proto-driven-ddd.md) | `.proto` を唯一のソースとし、Entity / Repository interface / Postgres 実装 / Mock を自動生成する |
 | [mss-protoc-gen](./docs/patterns/mss-protoc-gen.md) | DDD 層を生成するカスタム protoc プラグインの設計ガイド（言語別に実装） |
-| [インフラ差し替え](./docs/patterns/infra-swap.md) | 生成された InMemory 実装と本番 DB 実装を DI で切り替えるパターン |
+| [インフラ切り替え](./docs/patterns/infra-swap.md) | 生成対象 DB を Postgres → MySQL / Redis / MongoDB に移管する手順 |
 
-これらの参照実装は `manji-standard-server-go` / `manji-standard-server-ts-hono` に存在。Next 系実装は proto 駆動ではないが、[DI 差し替えパターン](./docs/patterns/infra-swap.md)・[共通原則](./docs/patterns/README.md)は同じく遵守。
+これらの参照実装は `manji-standard-server-go` / `manji-standard-server-ts-hono` / `manji-standard-server-ts-next` に存在。Next 系実装は **RPC プロトコルを持たない** が proto 駆動 DDD（ドメイン層生成）は採用しており、[切り替えパターン](./docs/patterns/infra-swap.md)・[共通原則](./docs/patterns/README.md)も同じく遵守。
+
+**永続化実装は Postgres 単一**。ユニットテストは生成された Mock、結合テストは testcontainers の Postgres を使う前提。InMemory 実装はこの標準には含めない。
+
+## 対象 DB / 自動生成対象の変更方法
+
+標準構成は PostgreSQL + GORM（TS は Drizzle / TypeORM 予定）だが、MySQL / Redis / MongoDB 等への変更、あるいは「Mock は生成しない」のような生成対象自体の変更もサポートする。切り替えに必要な知識は **2 層に分離** されている:
+
+### 役割分担
+
+| 層 | 場所 | 何を持つか | いつ編集するか |
+| --- | --- | --- | --- |
+| **Skill / Subagent** | `skills/*/SKILL.md` / `agents/*.md` | **技術非依存のワークフロー**（計画・実装・レビューの進め方） | 手順やポリシーが変わった時のみ。**DB 変更では編集しない** |
+| **CLAUDE.md** | 各プロジェクト直下 | **プロジェクト固有の技術スタック / 規約 / 生成物一覧** | DB 変更・ORM 変更・生成対象の増減で編集する |
+| **生成テンプレート** | `cmd/mss-protoc-gen/generator/` or `tools/mss-protoc-gen/generator/` | **各 DB 向けの具体コード** | DB 変更時にテンプレートを差し替え |
+
+Skill は CLAUDE.md を **起動時に読む**。そのため CLAUDE.md を更新すれば、以降の会話での計画立案・コード生成・レビューは新しい前提を踏襲する。Skill 本体を編集する必要はない。
+
+### ケース 1: Postgres → MySQL / Redis / MongoDB に移管する
+
+1. **CLAUDE.md のデータストア欄を更新**（各プロジェクトの `CLAUDE.md`）
+   ```diff
+   - **データストア**: PostgreSQL（GORM）
+   + **データストア**: MySQL（GORM `gorm.io/driver/mysql`）
+   ```
+2. **生成テンプレートを差し替え / フォーク**
+   - Go: `cmd/mss-protoc-gen/generator/infra_postgres_repository/` を `infra_mysql_repository/` にコピーし、内部の GORM ドライバ import と型マッピングを変更
+   - TS: `tools/mss-protoc-gen/generator/` 以下を同様に変更
+3. **ドライバ依存を差し替え**（`go get` / `npm install`）
+4. **`make proto-gen` で再生成** → コンパイルエラーが出た箇所（`main.go` / `container.ts` の DI など）を追従
+5. Mock / Entity / Repository interface は **変更不要**
+
+Redis / MongoDB のようにパラダイムが変わる場合は、interface そのものが成立しない操作（Redis での `SelectAll` 等）があるため proto アノテーションの見直しから入る。詳細: [`docs/patterns/infra-swap.md`](./docs/patterns/infra-swap.md)
+
+### ケース 2: 自動生成対象を増減させる（例: Mock をやめる / ハンドラも生成する）
+
+1. **CLAUDE.md の「生成物一覧」を更新** — 何が生成され、何を手書きするかの正本
+2. **`cmd/mss-protoc-gen/generator/<kind>/` のディレクトリを追加 / 削除**
+3. **プラグインの main 側で対象 kind のループを追加 / 削除**
+4. **生成ポリシーに影響する規約（ファイル命名・配置ルール）を `docs/patterns/mss-protoc-gen.md` に反映**
+
+### ケース 3: Skill / Subagent 自体の方針を変える
+
+技術非依存のワークフロー方針（例: Phase 分解の粒度、PR description のフォーマット、レビューの観点）を変更した場合:
+
+- `skills/` / `agents/` のファイルを更新した上で、**全 standard-server プロジェクトに同期**（`manji-standard-server/Makefile install` 等で配布）
+- 固有の技術に踏み込む記述を Skill に書かないこと（書くなら CLAUDE.md へ）
+
+### Skill が技術非依存であることの検証
+
+```bash
+# Skills / Agents に具体技術が漏れていないことを確認（返る場合は是正対象）
+grep -rE 'GORM|gorm|Postgres|postgres|MySQL|Redis|Mongo|InMemory|in-memory' \
+    manji-standard-server/skills/ manji-standard-server/agents/
+```
+
+Skill 側でどうしても DB を言及したい場合は具体名を避けて「CLAUDE.md の『データストア』欄に従う」のような **参照型** で記述する。
 
 ## 収録スキル
 
@@ -102,9 +176,10 @@ manji-standard-server 系が推奨するバックエンドアーキテクチャ�
 ### テスト
 | スキル | 用途 | トリガー例 |
 | --- | --- | --- |
-| [backend-test-planner](./skills/backend-test-planner/SKILL.md) | テスト層選定・ケース洗い出し・カバレッジ方針を設計する | 「テスト戦略立てて」「テスト計画書いて」 |
-| [backend-test-writer](./skills/backend-test-writer/SKILL.md) | 既存パターンに合わせてテストコードを書く | 「テスト書いて」「このコードのテスト追加して」 |
-| [backend-test-gap-finder](./skills/backend-test-gap-finder/SKILL.md) | テスト不足箇所を優先度付きで洗い出す | 「テスト不足どこ？」「テストギャップ調べて」 |
+| [backend-test-planner](./skills/backend-test-planner/SKILL.md) | Unit / Integration を区分けしたテスト層選定・ケース洗い出し・カバレッジ方針を設計する | 「テスト戦略立てて」「テスト計画書いて」 |
+| [backend-test-writer](./skills/backend-test-writer/SKILL.md) | 単体テスト(mock 前提)を既存パターンに合わせて書く | 「テスト書いて」「このコードのテスト追加して」 |
+| [backend-integration-test-writer](./skills/backend-integration-test-writer/SKILL.md) | 実 DB を起動して Handler → Repository を貫通させる integration test を書く | 「integration test 書いて」「E2E テスト追加して」「DB 込みのテスト書いて」 |
+| [backend-test-gap-finder](./skills/backend-test-gap-finder/SKILL.md) | テスト不足箇所を優先度付きで洗い出す(unit / integration 両面) | 「テスト不足どこ？」「テストギャップ調べて」 |
 
 ### レビュー / 思考整理
 | スキル | 用途 | トリガー例 |
@@ -389,7 +464,7 @@ proto/            # Proto 定義
 ## 技術スタック
 
 - **言語**: Go（バージョンは `.tool-versions` を参照）
-- **通信**: Connect RPC または gRPC
+- **API スタイル**: REST / gRPC / Connect RPC / GraphQL のいずれか
 - **Proto**: Protocol Buffers + buf（`buf.build`）
 - **HTTP サーバー**: Echo / Gin / net/http など
 - **DI**: Wire / Uber Fx など

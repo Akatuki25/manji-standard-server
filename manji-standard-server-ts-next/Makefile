@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help install dev build start test lint clean docker-build docker-up docker-down
+.PHONY: help install dev build start test lint clean proto-gen proto-clean docker-build docker-up docker-down
 
 help: ## ターゲット一覧
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -24,6 +24,12 @@ test: ## Vitest 実行
 
 lint: ## 型チェック
 	npm run lint
+
+proto-gen: ## proto から Entity / Repository / Mock / Postgres 実装を生成
+	npm run proto:gen
+
+proto-clean: ## 生成物を削除
+	npm run proto:clean
 
 clean: ## ビルド成果物削除
 	rm -rf .next node_modules

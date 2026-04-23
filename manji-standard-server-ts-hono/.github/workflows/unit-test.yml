@@ -1,0 +1,41 @@
+name: unit-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate proto and check for drift
+        run: |
+          npm run proto:gen
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::proto generation is out of date. Run 'npm run proto:gen' locally and commit the result."
+            git status
+            git --no-pager diff
+            exit 1
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit test (exclude integration)
+        # integration テストは test/integration/ 配下に置き、ここでは除外する。
+        run: npx vitest run --passWithNoTests --exclude 'test/integration/**'

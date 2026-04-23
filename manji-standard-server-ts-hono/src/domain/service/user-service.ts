@@ -16,7 +16,7 @@ export class UserService {
   ) {}
 
   async create(email: string, name: string): Promise<User> {
-    const existing = await this.userRepo.findByEmail(email);
+    const existing = await this.userRepo.selectByEmail(email);
     if (existing) {
       throw new EmailAlreadyTakenError();
     }
@@ -26,11 +26,11 @@ export class UserService {
       name,
       createdAt: this.clock(),
     });
-    await this.userRepo.save(user);
+    await this.userRepo.insert(user);
     return user;
   }
 
   async getById(id: string): Promise<User | null> {
-    return this.userRepo.findById(id);
+    return this.userRepo.selectByPk(id);
   }
 }

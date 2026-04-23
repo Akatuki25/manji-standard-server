@@ -1,8 +1,6 @@
 SHELL := /bin/bash
 
-BUF_VERSION            := v1.45.0
-PROTOC_GEN_GO_VERSION  := v1.34.2
-CONNECT_GO_VERSION     := v1.17.0
+BUF_VERSION := v1.45.0
 
 .DEFAULT_GOAL := help
 .PHONY: help build run test lint fmt tidy docker-build docker-up docker-down clean \
@@ -30,14 +28,13 @@ fmt: ## フォーマット
 tidy: ## go.sum 整理
 	go mod tidy
 
-install-tools: ## buf + protoc プラグインをインストール（カスタム mss-protoc-gen も含む）
+install-tools: ## buf + mss-protoc-gen をインストール
 	go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
-	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
-	go install connectrpc.com/connect/cmd/protoc-gen-connect-go@$(CONNECT_GO_VERSION)
 	go install ./cmd/mss-protoc-gen
 
 proto-gen: ## proto から Go コードを生成（gen/ 配下）
 	PATH="$$(go env GOPATH)/bin:$$PATH" buf generate
+	gofmt -w .
 
 proto-clean: ## 生成コードを削除
 	rm -rf gen/

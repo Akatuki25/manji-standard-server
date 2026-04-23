@@ -1,0 +1,8 @@
+version: v2
+plugins:
+  # Next は REST API（App Router の Route Handler）を採用するため、
+  # protoc-gen-es / protoc-gen-connect-es は入れず、mss-protoc-gen のみ実行してドメイン層だけを生成する。
+  - local: ["node", "./tools/mss-protoc-gen/index.mjs"]
+    out: .
+    opt:
+      - target=ts

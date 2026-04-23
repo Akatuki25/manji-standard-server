@@ -10,7 +10,7 @@ Go / TypeScript / Hono / Next / その他言語でも共通に適用できる原
 | --- | --- | --- |
 | Proto 駆動 DDD | [proto-driven-ddd.md](./proto-driven-ddd.md) | スキーマが安定し Entity が多数あるサービス |
 | カスタム protoc プラグイン設計 | [mss-protoc-gen.md](./mss-protoc-gen.md) | proto 駆動 DDD を実現するプラグイン実装時 |
-| インフラ層の差し替え（DI） | [infra-swap.md](./infra-swap.md) | 本番 DB とテスト用 InMemory を切り替える全プロジェクト |
+| インフラ層の切り替え | [infra-swap.md](./infra-swap.md) | 生成対象 DB を Postgres → MySQL / Redis / MongoDB に移管する場合 |
 
 ## 共通原則
 
@@ -42,16 +42,16 @@ Handler → UseCase → Service → Repository interface → Entity
 
 ### 5. テストは軽量に保つ
 
-- Entity / Service のユニットテストは生成された InMemory Repository でローカル完結
-- 結合テストは testcontainers 等で本物の DB を一時起動
-- 本番実装そのものを差し替えるための I/F は最初から整備する
+- Entity / Service のユニットテストは生成された **Mock Repository** でローカル完結
+- 結合テストは testcontainers 等で本物の DB を一時起動して Postgres 実装を検証する
+- DB を別エンジンに切り替える際は、テンプレート + CLAUDE.md の書き換えで反映する
 
 ## プロジェクトへの適用
 
 新規プロジェクト開始時:
 
 1. proto を書く（あるいは単に手書き interface で始める）
-2. 最小の Entity / Repository / InMemory を用意
+2. 最小の Entity / Repository interface / Postgres 実装 / Mock を用意
 3. Service / UseCase / Handler を書く
 4. 本番 DB 実装は必要になった時に差し替えパターンで追加
 

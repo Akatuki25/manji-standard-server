@@ -14,7 +14,7 @@ export class UserService {
         this.clock = clock;
     }
     async create(email, name) {
-        const existing = await this.userRepo.findByEmail(email);
+        const existing = await this.userRepo.selectByEmail(email);
         if (existing) {
             throw new EmailAlreadyTakenError();
         }
@@ -24,11 +24,11 @@ export class UserService {
             name,
             createdAt: this.clock(),
         });
-        await this.userRepo.save(user);
+        await this.userRepo.insert(user);
         return user;
     }
     async getById(id) {
-        return this.userRepo.findById(id);
+        return this.userRepo.selectByPk(id);
     }
 }
 //# sourceMappingURL=user-service.js.map

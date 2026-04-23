@@ -29,5 +29,9 @@ export class User {
             createdAt: props.createdAt,
         });
     }
+    /** 永続化層から復元した値で User を組み立てる（バリデーションなし）。通常コードパスでは create() を使うこと。 */
+    static hydrate(props) {
+        return new User(props);
+    }
 }
 //# sourceMappingURL=user.gen.js.map

@@ -7,18 +7,21 @@ import (
 	"github.com/example/manji-standard-server-go/pkg/domain/service"
 )
 
-type UserUsecase struct {
+// UserUsecaseImpl は生成された UserUsecase interface の実装。
+type UserUsecaseImpl struct {
 	userService *service.UserService
 }
 
-func NewUserUsecase(userService *service.UserService) *UserUsecase {
-	return &UserUsecase{userService: userService}
+var _ UserUsecase = (*UserUsecaseImpl)(nil)
+
+func NewUserUsecase(userService *service.UserService) *UserUsecaseImpl {
+	return &UserUsecaseImpl{userService: userService}
 }
 
-func (u *UserUsecase) CreateUser(ctx context.Context, email, name string) (*entity.User, error) {
-	return u.userService.Create(ctx, email, name)
+func (u *UserUsecaseImpl) CreateUser(ctx context.Context, input CreateUserInput) (*entity.User, error) {
+	return u.userService.Create(ctx, input.Email, input.Name)
 }
 
-func (u *UserUsecase) GetUser(ctx context.Context, id string) (*entity.User, error) {
-	return u.userService.GetByID(ctx, id)
+func (u *UserUsecaseImpl) GetUser(ctx context.Context, input GetUserInput) (*entity.User, error) {
+	return u.userService.GetByID(ctx, input.ID)
 }

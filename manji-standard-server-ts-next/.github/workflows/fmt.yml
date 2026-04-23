@@ -1,0 +1,24 @@
+name: fmt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Prettier check
+        # prettier を devDependency にせず、npx でその場取得。
+        # 生成物（*.gen.ts）も含めてデフォルト設定でチェック。
+        run: npx --yes prettier@3 --check 'src/**/*.{ts,tsx,js,mjs,json}' 'tools/**/*.{ts,mjs,js}'

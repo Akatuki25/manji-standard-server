@@ -1,19 +1,19 @@
-import type { User } from "@/domain/entity/user";
+import type { User } from "@/domain/entity/user.gen";
 import type { UserService } from "@/domain/service/user-service";
+import type {
+  CreateUserInput,
+  GetUserInput,
+  UserUsecase,
+} from "@/usecase/user-usecase-interface.gen";
 
-export type CreateUserInput = {
-  email: string;
-  name: string;
-};
-
-export class UserUsecase {
+export class UserUsecaseImpl implements UserUsecase {
   constructor(private readonly userService: UserService) {}
 
-  createUser(input: CreateUserInput): Promise<User> {
+  async createUser(input: CreateUserInput): Promise<User> {
     return this.userService.create(input.email, input.name);
   }
 
-  getUser(id: string): Promise<User | null> {
-    return this.userService.getById(id);
+  async getUser(input: GetUserInput): Promise<User | null> {
+    return this.userService.getById(input.id);
   }
 }

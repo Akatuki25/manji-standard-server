@@ -1,13 +1,5 @@
 version: v2
 plugins:
-  - local: protoc-gen-go
-    out: gen
-    opt:
-      - paths=source_relative
-  - local: protoc-gen-connect-go
-    out: gen
-    opt:
-      - paths=source_relative
-  # カスタムプラグイン: proto → Entity / Repository / InMemory 実装を生成
+  # カスタムプラグイン: proto → Entity / Repository / Mock / Postgres(GORM) / Usecase interface / REST Handler / DI 配線 を生成
   - local: mss-protoc-gen
     out: .

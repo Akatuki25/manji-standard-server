@@ -1,15 +1,7 @@
 version: v2
 plugins:
-  - local: ./node_modules/.bin/protoc-gen-es
-    out: src/gen
-    opt:
-      - target=ts
-  - local: ./node_modules/.bin/protoc-gen-connect-es
-    out: src/gen
-    opt:
-      - target=ts
-  # カスタムプラグイン: proto → Entity / Repository / InMemory 実装
-  - local: ["node", "./tools/mss-protoc-gen.mjs"]
+  # カスタムプラグイン: proto → Entity / Repository / Mock / Postgres(Drizzle) / Usecase interface / REST Handler / handler-registry を生成
+  - local: ["node", "./tools/mss-protoc-gen/index.mjs"]
     out: .
     opt:
       - target=ts

@@ -25,7 +25,7 @@ func NewUserService(userRepo repository.UserRepository, clock func() time.Time) 
 var ErrEmailAlreadyTaken = errors.New("email already taken")
 
 func (s *UserService) Create(ctx context.Context, email, name string) (*entity.User, error) {
-	existing, err := s.userRepo.FindByEmail(ctx, email)
+	existing, err := s.userRepo.SelectByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +37,12 @@ func (s *UserService) Create(ctx context.Context, email, name string) (*entity.U
 	if err != nil {
 		return nil, err
 	}
-	if err := s.userRepo.Save(ctx, user); err != nil {
+	if err := s.userRepo.Insert(ctx, user); err != nil {
 		return nil, err
 	}
 	return user, nil
 }
 
 func (s *UserService) GetByID(ctx context.Context, id string) (*entity.User, error) {
-	return s.userRepo.FindByID(ctx, id)
+	return s.userRepo.SelectByPK(ctx, id)
 }

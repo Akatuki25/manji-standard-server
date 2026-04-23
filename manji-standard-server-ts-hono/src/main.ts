@@ -1,37 +1,34 @@
-import * as http from "node:http";
-import { connectNodeAdapter } from "@connectrpc/connect-node";
-import { getRequestListener } from "@hono/node-server";
+import { serve } from "@hono/node-server";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Hono } from "hono";
-import { UserService as UserServiceDef } from "./gen/user/v1/user_connect.js";
+import pg from "pg";
 import { UserService } from "./domain/service/user-service.js";
-import { createUserServiceImpl } from "./handler/user-handler.js";
-import { InMemoryUserRepository } from "./infra/repository/in-memory-user-repository.gen.js";
-import { UserUsecase } from "./usecase/user-usecase.js";
+import { PostgresUserRepository } from "./infra/repository/user-postgres-repository.gen.js";
+import { registerHandlers } from "./lib/handler-registry.gen.js";
+import { UserUsecaseImpl } from "./usecase/user-usecase.js";
 
-// --- DI: 依存組み立て ---
-const userRepo = new InMemoryUserRepository();
+// --- DB 接続 ---
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  // eslint-disable-next-line no-console
+  console.error("DATABASE_URL is required (example: postgres://user:pass@localhost:5432/app)");
+  process.exit(1);
+}
+const pool = new pg.Pool({ connectionString: databaseUrl });
+const db = drizzle(pool);
+
+// --- DI: Usecase 実装を組み立て、生成された handler-registry に渡す ---
+const userRepo = new PostgresUserRepository(db);
 const userService = new UserService(userRepo);
-const userUsecase = new UserUsecase(userService);
+const userUsecase = new UserUsecaseImpl(userService);
 
-// --- Hono: 非 RPC のルート（ヘルスチェック等） ---
+// --- Hono: REST ルートをネイティブに登録 ---
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
-const honoListener = getRequestListener(app.fetch);
-
-// --- Connect: RPC を処理、非 RPC は Hono へフォールバック ---
-// hono/node-server と connect-node の req/res 型は HTTP/2 対応差で型定義が
-// 一致しないが、HTTP/1.1 のみで動かす本プロジェクトでは実行時互換。
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const fallback = honoListener as any;
-const handler = connectNodeAdapter({
-  routes(router) {
-    router.service(UserServiceDef, createUserServiceImpl(userUsecase));
-  },
-  fallback,
-});
+registerHandlers(app, { userUsecase });
 
 const port = Number(process.env.PORT ?? 8080);
-http.createServer(handler).listen(port, () => {
+serve({ fetch: app.fetch, port }, () => {
   // eslint-disable-next-line no-console
   console.log(`listening on http://localhost:${port}`);
 });

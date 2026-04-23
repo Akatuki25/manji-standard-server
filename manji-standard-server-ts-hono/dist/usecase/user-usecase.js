@@ -1,13 +1,13 @@
-export class UserUsecase {
+export class UserUsecaseImpl {
     userService;
     constructor(userService) {
         this.userService = userService;
     }
-    createUser(email, name) {
-        return this.userService.create(email, name);
+    async createUser(input) {
+        return this.userService.create(input.email, input.name);
     }
-    getUser(id) {
-        return this.userService.getById(id);
+    async getUser(input) {
+        return this.userService.getById(input.id);
     }
 }
 //# sourceMappingURL=user-usecase.js.map

@@ -1,6 +1,6 @@
 # manji-standard-server-go
 
-Go + DDD + クリーンアーキテクチャ + Connect RPC のバックエンドプロジェクト。
+Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロジェクト。
 
 > [manji-standard-server 系](../manji-standard-server/README.md) の **Go 参照実装**。基盤の skill / subagent / [アーキテクチャパターン](../manji-standard-server/docs/patterns/README.md)（proto 駆動 DDD / `mss-protoc-gen` / インフラ差し替え）に準拠。
 > 姉妹実装: [Hono 版](../manji-standard-server-ts-hono/) / [Next.js 版](../manji-standard-server-ts-next/)
@@ -14,22 +14,20 @@ go mod tidy          # 依存解決
 make run             # ローカル起動（:8080）
 ```
 
-## エンドポイント（Connect RPC）
+## エンドポイント (REST)
 
-Connect プロトコルは `POST /{package}.{service}/{method}` で、JSON / Protobuf / gRPC のいずれでも呼べます。
+URL は proto の rpc 毎に `@http METHOD /path` アノテーションで宣言済み。生成物の `pkg/di/handlers.gen.go` が `mux.HandleFunc` で登録する。
 
 ```bash
-# ユーザー作成（JSON over Connect）
-curl -X POST http://localhost:8080/user.v1.UserService/CreateUser \
+# ユーザー作成
+curl -X POST http://localhost:8080/api/users \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","name":"Alice"}'
 
 # ユーザー取得
-curl -X POST http://localhost:8080/user.v1.UserService/GetUser \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"<uuid>"}'
+curl http://localhost:8080/api/users/<uuid>
 
-# ヘルスチェック（通常の GET）
+# ヘルスチェック
 curl http://localhost:8080/health
 ```
 
@@ -64,7 +62,7 @@ make docker-down     # 停止
 
 User のような新ドメイン概念（例: `Order`）を追加する。
 
-1. `proto/order/v1/order.proto` を作成し、`// @entity` マーカー付きで定義
+1. `proto/order/v1/order.proto` を作成し、`// @entity` マーカー付きで定義。rpc には `// @http METHOD /path` を付ける
    ```proto
    // @entity
    message Order {
@@ -75,12 +73,18 @@ User のような新ドメイン概念（例: `Order`）を追加する。
      // @timestamp
      int64 created_at_unix = 3;
    }
+
+   service OrderService {
+     // @http POST /api/orders
+     rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+     // @http GET /api/orders/{id}
+     rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+   }
    ```
-2. `make proto-gen` を実行 → `entity/order.gen.go`、`repository/order_repository.gen.go`、`infra/repository/order_repository.gen.go` が生成
-3. `pkg/domain/service/order_service.go` を手書き（ビジネスルール）
-4. `pkg/usecase/order_usecase.go` を手書き（トランザクション境界）
-5. `pkg/handler/order_handler.go` を手書き（`userv1connect.OrderServiceHandler` 実装）
-6. `cmd/api/main.go` でワイヤリング追加
+2. `make proto-gen` → `entity/order.gen.go` / `repository/order_repository.gen.go` / `infra/repository/order_postgres_repository.gen.go` / `usecase/order_usecase_interface.gen.go` / `handler/order_handler.gen.go` / `di/handlers.gen.go` が生成
+3. `pkg/domain/service/order_service.go` を手書き(ビジネスルール)
+4. `pkg/usecase/order_usecase.go` に `OrderUsecaseImpl` を手書き(生成 interface を実装)
+5. `cmd/api/main.go` の `di.NewHandlers(...)` 呼び出しに `orderUsecase` を追加
 
 ### 既存エンティティにフィールドを追加したい
 
@@ -91,22 +95,25 @@ User に `phone_number` を追加するケース。
 3. **コンパイルエラー** で影響範囲（Service / Handler）が特定される
 4. エラーが出た箇所を最小差分で更新
 
-### 新しい RPC メソッドを追加したい
+### 新しい REST エンドポイントを追加したい
 
 `UserService` に `UpdateUser` を追加するケース。
 
-1. `proto/user/v1/user.proto` の `service` ブロックに `rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);` を追加
-2. `make proto-gen` → `userv1connect.UserServiceHandler` interface にメソッド追加
-3. `pkg/handler/user_handler.go` に `UpdateUser` メソッドを実装（実装しないとコンパイルエラー）
+1. `proto/user/v1/user.proto` の `service` ブロックに rpc を追加、`// @http PUT /api/users/{id}` を付ける
+2. `make proto-gen` → `UserUsecase` interface にメソッドが足され、生成 Handler と DI の `Register` に URL が追加される
+3. `pkg/usecase/user_usecase.go` の `UserUsecaseImpl` に新メソッドを実装(interface 要件を満たさないとコンパイルエラー)
 4. 必要に応じて UseCase / Service にメソッド追加
 
-### InMemory から PostgreSQL に切り替えたい
+### PostgreSQL から別 DB（MySQL / Redis / MongoDB）へ移管したい
 
-「インフラ層の差し替え」セクションを参照。要点:
+永続化は PostgreSQL + GORM 単一実装が既定。別 DB への移管は「生成テンプレートと CLAUDE.md の書き換え」で行う。
 
-1. `pkg/infra/repository/user_postgres_repository.go`（`.gen.go` ではない通常ファイル）を手書き
-2. `cmd/api/main.go` で `NewInMemoryUserRepository()` → `NewPostgresUserRepository(db)` に差し替え
-3. Service / UseCase / Handler は **一切変更不要**
+1. `CLAUDE.md` の「技術スタック > データストア」欄を更新
+2. `cmd/mss-protoc-gen/generator/infra_postgres_repository/` を `infra_<db>_repository/` にコピーして ORM / ドライバ / 型マッピングを差し替え
+3. ドライバ依存を入れ替え（`go get gorm.io/driver/mysql` 等）
+4. `make proto-gen` → コンパイルエラー箇所（`cmd/api/main.go` の DI など）を追従
+
+詳細は [`../manji-standard-server/README.md` の「対象 DB / 自動生成対象の変更方法」](../manji-standard-server/README.md#対象-db--自動生成対象の変更方法) と [`infra-swap.md`](../manji-standard-server/docs/patterns/infra-swap.md) を参照。
 
 ### バグを調査したい
 
@@ -149,7 +156,7 @@ User に `phone_number` を追加するケース。
 
 このプロジェクトには `.claude/skills/` と `.claude/agents/` が配置済みです。
 
-- `.claude/skills/` — 14 個の skill（`backend-spec-creator` ～ `backend-pr-describer` など）
+- `.claude/skills/` — 15 個の skill（`backend-spec-creator` ～ `backend-pr-describer` など）
 - `.claude/agents/` — 8 個の subagent（`backend-worker` / `backend-reviewer` / `backend-designer` など）
 
 Claude Code を起動すると自動で認識されます。スキル一覧は:
@@ -166,117 +173,51 @@ proto/user/v1/user.proto  ← 唯一の手書き source
      │
      └─ buf generate
          │
-         ├→ gen/user/v1/user.pb.go              [gen] (protoc-gen-go)
-         ├→ gen/user/v1/userv1connect/user.connect.go [gen] (protoc-gen-connect-go)
-         ├→ pkg/domain/entity/user.gen.go       [gen] (mss-protoc-gen)
-         ├→ pkg/domain/repository/user_repository.gen.go [gen]
-         └→ pkg/infra/repository/user_repository.gen.go  [gen]
+         ├→ pkg/domain/entity/user.gen.go       [mss-protoc-gen]
+         ├→ pkg/domain/repository/user_repository.gen.go
+         ├→ pkg/domain/repository/mock/mock_user_repository.gen.go
+         ├→ pkg/infra/repository/user_postgres_repository.gen.go
+         ├→ pkg/usecase/user_usecase_interface.gen.go
+         ├→ pkg/handler/user_handler.gen.go     (REST Handler、net/http)
+         └→ pkg/di/handlers.gen.go              (Register(mux))
 
-Handler (pkg/handler/user_handler.go)            ← 手書き（connect.Handler 実装）
-  ↓
-UseCase (pkg/usecase/user_usecase.go)            ← 手書き
-  ↓
-Service (pkg/domain/service/user_service.go)     ← 手書き（ビジネスロジック）
-  ↓
-Repository interface (生成)
-  ↑ 実装
-Infra InMemory Repository (生成)
-  ↓
-Entity (生成)
+REST Handler (生成) → Usecase interface (生成)
+                          ↑ 実装
+                      <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成) → Entity (生成)
+                                                                          ↑
+                                                               Postgres Repository (生成)
 ```
 
-Connect RPC リクエストは上から順に通り、最終的に `entity.User` として永続化されます。
+HTTP リクエストは生成 Handler が JSON を parse → Usecase 実装に委譲 → Entity を取得 → JSON として返却、の順で通ります。
 
-## インフラ層の差し替え（InMemory → PostgreSQL / MySQL 等）
+## インフラ層の構成（Postgres 単一実装）
 
-現在の Repository 実装は proto から生成された **InMemory 版**（`pkg/infra/repository/*_repository.gen.go`）です。
-開発・テスト用途のデフォルトで、そのまま本番には使えません。docker-compose に同梱されている PostgreSQL などに差し替える手順:
+Repository の本番実装は proto から生成された **PostgreSQL + GORM 版**（`pkg/infra/repository/*_postgres_repository.gen.go`）に統一しています。InMemory 実装は採用しません。
 
-### なぜ差し替えが容易か
+- **ユニットテスト**: 生成された Mock（`pkg/domain/repository/mock/`）を Service / UseCase のテストに注入
+- **結合テスト**: docker-compose または testcontainers で起動した PostgreSQL に `NewPostgresUserRepository(db)` で接続
+- **本番**: 同じ `NewPostgresUserRepository(db)`。DSN は環境変数
 
-- Repository **interface** は `pkg/domain/repository/*.gen.go` として自動生成され、ドメイン層（Service）はこれにのみ依存する
-- InMemory 実装も PostgreSQL 実装も、同じ interface を満たす別々の具象クラス
-- `cmd/api/main.go`（DI ワイヤリング）で差し替えるだけで、Service / UseCase / Handler は一切変更不要
-
-### 手順
-
-**1. 新しい Repository 実装を手書きで追加**（`*.gen.go` ではなく通常の `.go` ファイル）
+### 配線例（`cmd/api/main.go`）
 
 ```go
-// pkg/infra/repository/user_postgres_repository.go
-package repository
-
 import (
-    "context"
-    "database/sql"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
 
-    "github.com/example/manji-standard-server-go/pkg/domain/entity"
-    "github.com/example/manji-standard-server-go/pkg/domain/repository"
+    infrarepo "github.com/example/manji-standard-server-go/pkg/infra/repository"
 )
 
-type postgresUserRepository struct {
-    db *sql.DB
-}
-
-func NewPostgresUserRepository(db *sql.DB) repository.UserRepository {
-    return &postgresUserRepository{db: db}
-}
-
-func (r *postgresUserRepository) Save(ctx context.Context, u *entity.User) error {
-    _, err := r.db.ExecContext(ctx,
-        `INSERT INTO users (id, email, name, created_at) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
-        u.ID, u.Email, u.Name, u.CreatedAt)
-    return err
-}
-
-func (r *postgresUserRepository) FindByID(ctx context.Context, id string) (*entity.User, error) {
-    // SELECT id, email, name, created_at FROM users WHERE id = $1
-    // ...
-}
-
-func (r *postgresUserRepository) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
-    // SELECT id, email, name, created_at FROM users WHERE email = $1
-    // ...
-}
-```
-
-**2. `cmd/api/main.go` で切り替え**
-
-```go
-// Before (InMemory、生成物)
-userRepo := infrarepo.NewInMemoryUserRepository()
-
-// After (PostgreSQL、手書き)
-db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
+db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 if err != nil { log.Fatal(err) }
+if err := infrarepo.AutoMigrateUser(db); err != nil { log.Fatal(err) }
 userRepo := infrarepo.NewPostgresUserRepository(db)
 ```
 
-**3. 依存ドライバを追加**
+### 別 DB（MySQL / Redis / MongoDB）へ移管する場合
 
-```bash
-go get github.com/jackc/pgx/v5/stdlib  # or github.com/lib/pq
-```
+CLAUDE.md の「データストア」欄と `cmd/mss-protoc-gen/generator/infra_postgres_repository/` のテンプレートを書き換えて `make proto-gen` で再生成する。ランタイムの DI 切り替えではなく、**テンプレート差し替え + 再生成** が切り替え手段。
 
-**4. Service / UseCase / Handler は変更不要**
-
-Repository interface が抽象化してくれるため、実装差し替えはドメイン層まで波及しない。
-
-### 併用パターン（推奨）
-
-- **本番・ステージング**: PostgreSQL 実装
-- **ユニットテスト**: 生成された InMemory 実装（`NewInMemoryUserRepository()` のまま）
-- **結合テスト**: testcontainers で起動した一時 PostgreSQL
-
-DI 切り替えは環境変数で行う:
-
-```go
-var userRepo repository.UserRepository
-if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
-    db, _ := sql.Open("postgres", dsn)
-    userRepo = infrarepo.NewPostgresUserRepository(db)
-} else {
-    userRepo = infrarepo.NewInMemoryUserRepository()
-}
-```
+詳細は:
+- [`../manji-standard-server/README.md#対象-db--自動生成対象の変更方法`](../manji-standard-server/README.md#対象-db--自動生成対象の変更方法)
+- [`../manji-standard-server/docs/patterns/infra-swap.md`](../manji-standard-server/docs/patterns/infra-swap.md)
