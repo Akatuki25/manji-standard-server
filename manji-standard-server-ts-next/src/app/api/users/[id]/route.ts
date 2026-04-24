@@ -4,25 +4,23 @@ import "@/lib/container"; // side-effect: HandlerDeps factory を登録
 import { NextResponse } from "next/server";
 
 
-import type { User } from "@/domain/entity/user.gen";
 import {
   UserNotFoundError,
   UserAlreadyExistsError,
 } from "@/domain/repository/user-repository.gen";
 import { getHandlerDeps } from "@/lib/handler-registry.gen";
+import type {
+  UserUsecase,
+  GetUserInput,
+  UpsertUserInput,
+  UpdateUserInput,
+  DeleteUserInput,
+  CreateUserParams,
+  UpsertUserParams,
+} from "@/usecase/user-usecase-interface.gen";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-
-function userToJson(e: User) {
-  return {
-    id: e.id,
-    email: e.email,
-    name: e.name,
-    createdAtUnix: Math.floor(e.createdAt.getTime() / 1000),
-  };
-}
 
 function toHttpError(err: unknown): NextResponse {
   if (err instanceof UserNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
@@ -32,18 +30,94 @@ function toHttpError(err: unknown): NextResponse {
 }
 
 
-
 export async function GET(
   _req: Request,
   { params }: { params: { id: string; } },
 ) {
   try {
     const deps = getHandlerDeps();
-    const e = await deps.userUsecase.getUser({
+    const input: GetUserInput = {
       id: params.id,
-    });
-    if (!e) return NextResponse.json({ error: "user not found" }, { status: 404 });
-    return NextResponse.json(userToJson(e), { status: 200 });
+    };
+    const result = await deps.userUsecase.getUser(input);
+    if (!result) return NextResponse.json({ error: "user not found" }, { status: 404 });
+    return NextResponse.json(result, { status: 200 });
+  } catch (err) {
+    return toHttpError(err);
+  }
+}
+
+type UpsertUserBody = {
+  email?: string;
+  name?: string;
+  created_at_unix?: number;
+};
+export async function PUT(
+  req: Request,
+  { params }: { params: { id: string; } },
+) {
+  let body: UpsertUserBody;
+  try {
+    body = (await req.json()) as UpsertUserBody;
+  } catch {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+  try {
+    const deps = getHandlerDeps();
+    const input: UpsertUserInput = {
+      id: params.id,
+      email: body.email ?? "",
+      name: body.name ?? "",
+      createdAtUnix: body.created_at_unix ?? 0,
+    };
+    const result = await deps.userUsecase.upsertUser(input);
+    if (!result) return NextResponse.json({ error: "user not found" }, { status: 404 });
+    return NextResponse.json(result, { status: 200 });
+  } catch (err) {
+    return toHttpError(err);
+  }
+}
+
+type UpdateUserBody = {
+  email?: string;
+  name?: string;
+};
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string; } },
+) {
+  let body: UpdateUserBody;
+  try {
+    body = (await req.json()) as UpdateUserBody;
+  } catch {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+  try {
+    const deps = getHandlerDeps();
+    const input: UpdateUserInput = {
+      id: params.id,
+      email: body.email ?? "",
+      name: body.name ?? "",
+    };
+    const result = await deps.userUsecase.updateUser(input);
+    if (!result) return NextResponse.json({ error: "user not found" }, { status: 404 });
+    return NextResponse.json(result, { status: 200 });
+  } catch (err) {
+    return toHttpError(err);
+  }
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { id: string; } },
+) {
+  try {
+    const deps = getHandlerDeps();
+    const input: DeleteUserInput = {
+      id: params.id,
+    };
+    await deps.userUsecase.deleteUser(input);
+    return new NextResponse(null, { status: 204 });
   } catch (err) {
     return toHttpError(err);
   }

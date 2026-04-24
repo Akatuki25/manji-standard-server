@@ -23,6 +23,9 @@ vendor/
 # Env
 .env
 .env.local
+.env.dev
+.env.staging
+.env.prod
 .env.*.local
 
 # OS

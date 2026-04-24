@@ -4,30 +4,25 @@ import "@/lib/container"; // side-effect: HandlerDeps factory を登録
 import { NextResponse } from "next/server";
 
 {{range .UsedEntities}}
-import type { {{.Name}} } from "@/domain/entity/{{.Kebab}}.gen";
 import {
   {{.Name}}NotFoundError,
   {{.Name}}AlreadyExistsError,
 } from "@/domain/repository/{{.Kebab}}-repository.gen";
 {{- end}}
 import { getHandlerDeps } from "@/lib/handler-registry.gen";
+import type {
+  {{.UsecaseTypeName}},
+{{- range .Methods}}
+  {{.InputTypeName}},
+{{- end}}
+{{- range .NonEntityTypes}}
+  {{.Name}},
+{{- end}}
+} from "@/usecase/{{.Kebab}}-usecase-interface.gen";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-{{range .UsedEntities}}
-function {{.LowerFirst}}ToJson(e: {{.Name}}) {
-  return {
-{{- range .Fields}}
-{{- if .isTimestamp}}
-    {{.name}}Unix: Math.floor(e.{{.name}}.getTime() / 1000),
-{{- else}}
-    {{.name}}: e.{{.name}},
-{{- end}}
-{{- end}}
-  };
-}
-{{end}}
 function toHttpError(err: unknown): NextResponse {
 {{- range .UsedEntities}}
   if (err instanceof {{.Name}}NotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
@@ -38,29 +33,26 @@ function toHttpError(err: unknown): NextResponse {
 }
 
 {{range .Methods}}
-{{- if .HasBodyFields}}
+{{- if and .IsBodyMethod .HasBodyFields}}
 type {{.rpcName}}Body = {
 {{- range .BodyFields}}
-  {{.name}}?: {{.type}};
+  {{.jsonName}}?: {{.type}};
 {{- end}}
 };
 {{- end}}
 
+{{- if or (and .IsBodyMethod .HasBodyFields) .HasQueryFields}}
 export async function {{.Http.Method}}(
-{{- if .HasBodyFields}}
   req: Request,
+{{- else}}
+export async function {{.Http.Method}}(
+  _req: Request,
 {{- end}}
 {{- if .HasPathParams}}
-{{- if .HasBodyFields}}{{else}}
-  _req: Request,
+  { params }: { params: { {{range .PathParamFields}}{{.jsonName}}: string; {{end}}} },
 {{- end}}
-  { params }: { params: { {{range .PathParamFields}}{{.name}}: {{.type}}; {{end}}} },
-{{- end}}
-{{- if .HasBodyFields}}{{else}}{{if .HasPathParams}}{{else}}
-  _req: Request,
-{{- end}}{{end}}
 ) {
-{{- if .HasBodyFields}}
+{{- if and .IsBodyMethod .HasBodyFields}}
   let body: {{.rpcName}}Body;
   try {
     body = (await req.json()) as {{.rpcName}}Body;
@@ -68,64 +60,31 @@ export async function {{.Http.Method}}(
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
 {{- end}}
+{{- if .HasQueryFields}}
+  const searchParams = new URL(req.url).searchParams;
+{{- end}}
   try {
     const deps = getHandlerDeps();
+{{- if .HasInputFields}}
+    const input: {{.InputTypeName}} = {
+{{- range .InputFields}}
+      {{.name}}: {{.assignExpr}},
+{{- end}}
+    };
+{{- else}}
+    const input = {} as {{.InputTypeName}};
+{{- end}}
 {{- if .ReturnsEntity}}
-    const e = await deps.{{.UsecaseVarName}}.{{.lowerName}}({
-{{- range .PathParamFields}}
-      {{.name}}: params.{{.name}},
-{{- end}}
-{{- range .BodyFields}}
-{{- if eq .type "string"}}
-      {{.name}}: body.{{.name}} ?? "",
-{{- end}}
-{{- if eq .type "number"}}
-      {{.name}}: body.{{.name}} ?? 0,
-{{- end}}
-{{- if eq .type "boolean"}}
-      {{.name}}: body.{{.name}} ?? false,
-{{- end}}
-{{- end}}
-    });
-    if (!e) return NextResponse.json({ error: "{{.EntityLowerFirst}} not found" }, { status: 404 });
-    return NextResponse.json({{.EntityLowerFirst}}ToJson(e), { status: {{if eq .Http.Method "POST"}}201{{else}}200{{end}} });
+    const result = await deps.{{.UsecaseVarName}}.{{.lowerName}}(input);
+    if (!result) return NextResponse.json({ error: "{{.EntityLowerFirst}} not found" }, { status: 404 });
+    return NextResponse.json(result, { status: {{if eq .Http.Method "POST"}}201{{else}}200{{end}} });
 {{- end}}
 {{- if .ReturnsList}}
-    const list = await deps.{{.UsecaseVarName}}.{{.lowerName}}({
-{{- range .PathParamFields}}
-      {{.name}}: params.{{.name}},
-{{- end}}
-{{- range .BodyFields}}
-{{- if eq .type "string"}}
-      {{.name}}: body.{{.name}} ?? "",
-{{- end}}
-{{- if eq .type "number"}}
-      {{.name}}: body.{{.name}} ?? 0,
-{{- end}}
-{{- if eq .type "boolean"}}
-      {{.name}}: body.{{.name}} ?? false,
-{{- end}}
-{{- end}}
-    });
-    return NextResponse.json(list.map({{.EntityLowerFirst}}ToJson), { status: 200 });
+    const list = await deps.{{.UsecaseVarName}}.{{.lowerName}}(input);
+    return NextResponse.json(list, { status: {{if eq .Http.Method "POST"}}201{{else}}200{{end}} });
 {{- end}}
 {{- if .ReturnsEmpty}}
-    await deps.{{.UsecaseVarName}}.{{.lowerName}}({
-{{- range .PathParamFields}}
-      {{.name}}: params.{{.name}},
-{{- end}}
-{{- range .BodyFields}}
-{{- if eq .type "string"}}
-      {{.name}}: body.{{.name}} ?? "",
-{{- end}}
-{{- if eq .type "number"}}
-      {{.name}}: body.{{.name}} ?? 0,
-{{- end}}
-{{- if eq .type "boolean"}}
-      {{.name}}: body.{{.name}} ?? false,
-{{- end}}
-{{- end}}
-    });
+    await deps.{{.UsecaseVarName}}.{{.lowerName}}(input);
     return new NextResponse(null, { status: 204 });
 {{- end}}
   } catch (err) {

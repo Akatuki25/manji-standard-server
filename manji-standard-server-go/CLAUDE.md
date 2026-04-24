@@ -5,7 +5,7 @@ Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロ�
 
 ## 技術スタック
 
-- **言語**: Go 1.22
+- **言語**: Go 1.25
 - **API スタイル**: REST(JSON over HTTP)。URL は proto の rpc に付けた `@http METHOD /path` アノテーションで宣言する
 - **Proto**: Protocol Buffers + buf(`buf generate` でドメイン層〜ハンドラまで生成)
 - **コード生成プラグイン**:
@@ -22,50 +22,57 @@ Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロ�
 
 ## アーキテクチャ
 
-- **パターン**: DDD（ドメイン駆動設計） + クリーンアーキテクチャ
+- **パターン**: DDD(ドメイン駆動設計) + クリーンアーキテクチャ
 - **レイヤー構成**:
   ```
   Proto (.proto)
    └→ mss-protoc-gen で以下を生成:
-      pkg/domain/entity/*.gen.go                       (Entity)
-      pkg/domain/repository/*_repository.gen.go        (interface)
-      pkg/domain/repository/mock/mock_*_repository.gen.go(テスト用スタブ)
-      pkg/infra/repository/*_postgres_repository.gen.go(Postgres + GORM)
-      pkg/usecase/*_usecase_interface.gen.go           (Usecase interface + Input 型)
-      pkg/handler/*_handler.gen.go                     (REST Handler、net/http ベース)
-      pkg/di/handlers.gen.go                           (Handlers struct + Register(mux))
+      internal/domain/entity/*.gen.go                       (Entity + GORM タグ)
+      internal/domain/repository/*_repository.gen.go        (interface)
+      internal/domain/repository/mock/mock_*_repository.gen.go (テスト用スタブ)
+      internal/infra/repository/*_postgres_repository.gen.go(Postgres + GORM)
+      internal/dto/*.gen.go                                  (DTO + entity → DTO 変換関数)
+      internal/usecase/*_usecase_interface.gen.go            (Usecase interface + Input 型)
+      internal/handler/*_handler.gen.go                      (REST Handler、net/http ベース)
+      internal/di/handlers.gen.go                            (Handlers struct + Register(mux))
                             ↓
-  Handler (生成) → Usecase interface (生成)
-                      ↑ 実装
-                  <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成)
-                                                                     ↑ 実装
-                                                           Postgres Repository (生成)
-                                                                     ↓
-                                                                  Entity (生成)
+  Handler (生成) ──json.Encode──→ DTO (生成)
+       ↓ 呼び出し                  ↑ 変換(usecase 内で dto.From*)
+  Usecase interface (生成)        Entity (生成)
+       ↑ 実装                       ↑ GORM が直接読み書き
+  <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成)
+                                                     ↑ 実装
+                                          Postgres Repository (生成)
   ```
-- **依存方向**: 常に内側（Entity）に向かう。Entity は他層を import しない。
-- **DI**: コンストラクタ注入（`cmd/api/main.go` でワイヤリング）
+- **依存方向**: 常に内側(Entity)に向かう。Entity は他層を import しない。
+- **DI**: コンストラクタ注入(`cmd/api/main.go` でワイヤリング)
+- **DTO 境界**: クライアントへ返す JSON 表現は **DTO 層が一元管理** する。Usecase が `*entity.X` を `*dto.XDTO` に変換して返し、Handler は `json.Encode(result)` するだけ。Entity 側の json タグは持たず、`gorm:` タグのみ。
+- **Entity = ORM モデル**: 生成 Entity は GORM の `column / primaryKey / uniqueIndex / not null` タグを所有し、`TableName()` も自動付与される。`*entity.X` を直接 `db.Create / Find` に渡せる(`HydrateX` のような中間モデルを噛ませない)。
+- **可視性境界**: ドメイン〜インフラ〜DI〜Handler はすべて `internal/` 配下に置き、外部モジュールから import 不可にする。`pkg/util/` だけは横断的ユーティリティ(env / logger / tx)として `pkg/` に残し、外部からも参照可能。
 
 ## ディレクトリ構造
 
 ```
 manji-standard-server-go/
 ├── cmd/
-│   ├── api/                    # エントリポイント（ワイヤリング + net/http）
-│   └── mss-protoc-gen/      # 独自 protoc プラグイン（DDD 層の自動生成）
-├── pkg/
+│   ├── api/                    # エントリポイント(ワイヤリング + net/http)
+│   └── mss-protoc-gen/         # 独自 protoc プラグイン(DDD 層の自動生成)
+├── internal/
 │   ├── domain/
-│   │   ├── entity/             # *.gen.go（生成）
-│   │   ├── repository/         # *_repository.gen.go（interface、生成）
-│   │   │   └── mock/           # mock_*_repository.gen.go（テスト用スタブ、生成）
-│   │   └── service/            # ドメインサービス（★手書き）
-│   ├── usecase/                # *_usecase_interface.gen.go（interface、生成） + <Name>UsecaseImpl（★手書き）
-│   ├── handler/                # *_handler.gen.go（Connect Handler、生成）
+│   │   ├── entity/             # *.gen.go(生成、GORM タグ + TableName 内蔵)
+│   │   ├── repository/         # *_repository.gen.go(interface、生成)
+│   │   │   └── mock/           # mock_*_repository.gen.go(テスト用スタブ、生成)
+│   │   └── service/            # ドメインサービス(★手書き)
+│   ├── dto/                    # *.gen.go(DTO + From<Entity> 変換、生成)
+│   ├── usecase/                # *_usecase_interface.gen.go(生成) + <Name>UsecaseImpl(★手書き)
+│   ├── handler/                # *_handler.gen.go(REST Handler、生成)
 │   ├── infra/
-│   │   └── repository/         # *_postgres_repository.gen.go（GORM、生成）
+│   │   └── repository/         # *_postgres_repository.gen.go(GORM、生成)
 │   └── di/
-│       └── handlers.gen.go     # Handlers struct + Register(mux)（生成）
-├── proto/                      # Protocol Buffers 定義（唯一の手書きソース）
+│       └── handlers.gen.go     # Handlers struct + Register(mux)(生成)
+├── pkg/
+│   └── util/                   # env / logger / tx(★手書き、横断ユーティリティ)
+├── proto/                      # Protocol Buffers 定義(唯一の手書きソース)
 │   └── user/v1/user.proto
 ├── buf.yaml                    # buf lint / breaking 設定
 ├── buf.gen.yaml                # 生成プラグイン設定
@@ -75,21 +82,22 @@ manji-standard-server-go/
     └── knowledge/              # ナレッジ
 ```
 
-## proto アノテーション（mss-protoc-gen が解釈）
+## proto アノテーション(mss-protoc-gen が解釈)
 
-- `// @entity` — メッセージに付与。Entity / Repository interface / Mock / Postgres 実装の 4 ファイルが生成される
+- `// @entity` — メッセージに付与。Entity / Repository interface / Mock / Postgres 実装 / **DTO** の 5 ファイルが生成される
 - `// @pk` — フィールドに付与。主キー。`SelectByPK` / `Delete` / `BulkDelete` が生成される
 - `// @unique` — フィールドに付与。`SelectBy<Field>` が追加生成される
 - `// @email` — フィールドに付与。email 形式バリデーション
 - `// @required` — フィールドに付与。非空バリデーション
-- `// @timestamp` — `int64` フィールドに付与。Entity 側で `time.Time` にマップ
-- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。`{name}` は `r.PathValue("name")` で取り出す
+- `// @timestamp` — `int64` フィールドに付与。Entity 側で `time.Time` にマップ。DTO 側では `<name>_unix: int64` に展開
+- `// @paging` — フィールドに付与。cursor pagination の cursor 列。`SelectByCursor(limit, after)` が追加生成される。`@pk` か `@unique` を併記する必要があり、proto 型は `string` / `int32` / `int64` のみ
+- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。`{name}` は `r.PathValue("name")` で取り出す。`POST/PUT/PATCH` は body decode、`GET/DELETE` は query string から組み立てる
 
 例:
 ```proto
 // @entity
 message User {
-  // @pk
+  // @pk @paging
   string id = 1;
   // @unique @email
   string email = 2;
@@ -99,6 +107,13 @@ message User {
   int64 created_at_unix = 4;
 }
 ```
+
+### Response 形状とハンドラ生成
+
+- 単一フィールドの response が `@entity` メッセージなら、Usecase は `*dto.<Name>DTO` / `[]*dto.<Name>DTO` を返す
+- 複数フィールド or 非 entity message なら usecase ファイル内に `<Method>Output` struct を生成して返す
+- `repeated <NonEntityMessage>` のように bulk 系入力で参照される非 entity message は usecase ファイル内に struct として emit され、`<Method>Input` と名前衝突したらリネームされる
+- response が空(empty message)なら `error` のみ返す。Handler は 204 No Content
 
 ## コーディング規約
 
@@ -124,13 +139,16 @@ message User {
 
 ## 規約上の禁則
 
-- `cmd/api/main.go` 以外で具体的な Repository 実装を import しない（依存注入は main でのみ）
-- Service / UseCase 層から直接 DB に触らない（Repository 経由）
-- Entity に依存性を持たせない（Entity は純粋なデータ + 生成ロジックのみ）
-- **`*.gen.go` ファイルを手動編集しない**(Entity / Repository / Mock / Postgres 実装 / Usecase interface / REST Handler / DI 配線はすべて proto から生成)
-- Handler を手書き追加しない（生成物で十分、複雑な変換が必要なら Usecase 実装に寄せる）
+- `cmd/api/main.go` 以外で具体的な Repository 実装を import しない(依存注入は main でのみ)
+- Service / UseCase 層から直接 DB に触らない(Repository 経由)
+- Entity に依存性を持たせない(GORM タグ + バリデーションロジックのみ。他層を import しない)
+- **`*.gen.go` ファイルを手動編集しない**(Entity / DTO / Repository / Mock / Postgres 実装 / Usecase interface / REST Handler / DI 配線はすべて proto から生成)
+- Handler を手書き追加しない(生成物で十分、複雑な変換が必要なら Usecase 実装に寄せる)
+- **Usecase は entity を直接返さない**。クライアントへ抜ける戻り値は必ず `dto.From<Name>` で DTO に変換してから返す
+- **Handler は DTO の整形をしない**。`json.Encode(usecaseResult)` だけ。json タグの責務は DTO のみ
 - proto 変更後は必ず `make proto-gen` を実行
-- Entity に振る舞いを足したい場合は `<snake>_ext.go` で拡張する（生成ファイルとは別ファイル）
+- Entity に振る舞いを足したい場合は `<snake>_ext.go` で拡張する(生成ファイルとは別ファイル)
+- `internal/` 配下のパッケージを外部モジュールから import しない(Go の internal 規則で物理的に禁止される)
 
 ## コミット・PR
 

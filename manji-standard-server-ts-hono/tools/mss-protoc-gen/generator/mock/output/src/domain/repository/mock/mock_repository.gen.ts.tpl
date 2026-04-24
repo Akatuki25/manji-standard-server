@@ -18,4 +18,7 @@ export class Mock{{.Name}}Repository implements {{.Name}}Repository {
   delete = vi.fn<({{.PKField.name}}: {{.PKField.type}}) => Promise<void>>(async () => {});
   bulkDelete = vi.fn<({{.PKField.name}}s: {{.PKField.type}}[]) => Promise<void>>(async () => {});
   deleteAll = vi.fn<() => Promise<void>>(async () => {});
+{{- if .HasPaging}}
+  selectByCursor = vi.fn<(limit: number, after: {{.PagingField.type}} | null) => Promise<{{.Name}}[]>>(async () => []);
+{{- end}}
 }

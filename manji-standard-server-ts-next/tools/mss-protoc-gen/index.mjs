@@ -3,11 +3,15 @@
  * mss-protoc-gen (Next 版)
  *
  * proto メッセージの `@entity` マーカーから DDD の Entity / Repository interface /
- * Mock / Postgres (Drizzle ORM) 実装を生成する。加えて proto service/rpc から
+ * Mock / Postgres (Drizzle ORM) 実装 / DTO を生成する。加えて proto service/rpc から
  * Usecase interface / REST Route Handler / handler-registry を生成する。
  *
  * REST のルーティングは rpc の leading comment に `// @http METHOD /path` を書く。
- * 例: `// @http GET /api/users/{id}` → `src/app/api/users/[id]/route.gen.ts`
+ * 例: `// @http GET /api/users/{id}` → `src/app/api/users/[id]/route.ts`
+ *
+ * 解釈アノテーション:
+ *   @entity / @pk / @unique / @email / @required / @timestamp / @paging / @http
+ *   詳細は hono 版と同じ。
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -41,6 +45,11 @@ const ENTITY_KINDS = [
     tplPath: "generator/infra_postgres_repository/output/src/infra/repository/postgres_repository.gen.ts.tpl",
     outPath: (kebab) => `src/infra/repository/${kebab}-postgres-repository.gen.ts`,
   },
+  {
+    name: "dto",
+    tplPath: "generator/dto/output/src/dto/dto.gen.ts.tpl",
+    outPath: (kebab) => `src/dto/${kebab}.gen.ts`,
+  },
 ];
 
 const SERVICE_KINDS = [
@@ -71,7 +80,7 @@ const funcs = {
 
 const plugin = createEcmaScriptPlugin({
   name: "mss-protoc-gen",
-  version: "v0.4.0-next",
+  version: "v0.5.0-next",
   generateTs(schema) {
     const entitiesByFullName = new Map();
     for (const file of schema.files) {
@@ -108,7 +117,14 @@ const plugin = createEcmaScriptPlugin({
           if (!m.Http) continue;
           const key = m.Http.NextPath;
           if (!routesByPath.has(key)) {
-            routesByPath.set(key, { NextPath: key, Methods: [], UsedEntities: [] });
+            routesByPath.set(key, {
+              NextPath: key,
+              Methods: [],
+              UsedEntities: [],
+              NonEntityTypes: [],
+              UsecaseTypeName: svc.UsecaseTypeName,
+              Kebab: svc.Kebab,
+            });
           }
           const group = routesByPath.get(key);
           group.Methods.push({
@@ -121,14 +137,19 @@ const plugin = createEcmaScriptPlugin({
             const entRef = svc.UsedEntities.find((e) => e.Name === m.EntityName);
             if (entRef) group.UsedEntities.push(entRef);
           }
+          for (const t of svc.NonEntityTypes) {
+            if (!group.NonEntityTypes.find((x) => x.Name === t.Name)) {
+              group.NonEntityTypes.push(t);
+            }
+          }
         }
       }
     }
 
     for (const [nextPath, group] of routesByPath) {
       const rendered = render(templates.handler_rest, group, funcs);
-      // Next.js は `route.ts` / `route.tsx` / `route.js` のみを Route Handler と認識するため
-      // `.gen.ts` は使えない。代わりに先頭の "Code generated" コメントで生成物を明示する。
+      // Next.js は route.ts/.tsx/.js のみを Route Handler と認識するため .gen.ts は使えない。
+      // 先頭の "Code generated" コメントで生成物を明示する。
       const f = schema.generateFile(`src/app${nextPath}/route.ts`);
       f.print(rendered.trimEnd());
     }
@@ -156,7 +177,6 @@ function hasMarker(text, marker) {
   return false;
 }
 
-// `// @http METHOD /path` を leading comment から抽出
 function parseHttpAnnotation(text) {
   if (!text) return null;
   for (const line of text.split("\n")) {
@@ -167,10 +187,56 @@ function parseHttpAnnotation(text) {
       const urlPath = match[2];
       const nextPath = urlPath.replace(/\{([^}]+)\}/g, "[$1]");
       const pathParams = Array.from(urlPath.matchAll(/\{([^}]+)\}/g)).map((m) => m[1]);
-      return { Method: method, Path: urlPath, NextPath: nextPath, PathParams: pathParams };
+      const isBodyMethod = ["POST", "PUT", "PATCH"].includes(method);
+      const isQueryMethod = ["GET", "DELETE"].includes(method);
+      return {
+        Method: method,
+        MethodLower: method.toLowerCase(),
+        Path: urlPath,
+        NextPath: nextPath,
+        PathParams: pathParams,
+        IsBodyMethod: isBodyMethod,
+        IsQueryMethod: isQueryMethod,
+      };
     }
   }
   return null;
+}
+
+function scalarTsType(field) {
+  switch (field.scalar) {
+    case 9:
+      return "string";
+    case 5:
+    case 3:
+    case 13:
+    case 4:
+      return "number";
+    case 8:
+      return "boolean";
+    default:
+      return "string";
+  }
+}
+
+function queryScalarType(field) {
+  if (field.repeated || field.message) return null;
+  return scalarTsType(field);
+}
+
+function defaultValueExpr(field) {
+  if (field.repeated) return "[]";
+  if (field.message) return "undefined as never";
+  switch (scalarTsType(field)) {
+    case "string":
+      return '""';
+    case "number":
+      return "0";
+    case "boolean":
+      return "false";
+    default:
+      return '""';
+  }
 }
 
 function parseEntity(message) {
@@ -179,6 +245,7 @@ function parseEntity(message) {
 
   const fields = [];
   let pkField = null;
+  let pagingField = null;
   const uniqueFieldsNonPK = [];
 
   for (const field of message.fields) {
@@ -188,6 +255,7 @@ function parseEntity(message) {
     const isEmail = hasMarker(comment, "@email");
     const isRequired = hasMarker(comment, "@required");
     const isTimestamp = hasMarker(comment, "@timestamp");
+    const isPaging = hasMarker(comment, "@paging");
 
     let type = "string";
     let name = localName(field);
@@ -197,29 +265,43 @@ function parseEntity(message) {
       type = "Date";
       name = name.replace(/Unix$/, "");
     } else {
-      switch (field.scalar) {
-        case 9:
-          type = "string";
-          break;
-        case 5:
-        case 3:
-        case 13:
-        case 4:
-          type = "number";
-          break;
-        case 8:
-          type = "boolean";
-          break;
-        default:
-          type = "string";
-      }
+      type = scalarTsType(field);
     }
 
     const snakeName = camelToSnake(name);
-    const spec = { name, pbName, snakeName, type, isPk, isUnique, isEmail, isRequired, isTimestamp };
+    const spec = {
+      name,
+      pbName,
+      snakeName,
+      type,
+      isPk,
+      isUnique,
+      isEmail,
+      isRequired,
+      isTimestamp,
+      isPaging,
+    };
     fields.push(spec);
     if (isPk) pkField = spec;
     if (isUnique && !isPk) uniqueFieldsNonPK.push(spec);
+    if (isPaging) {
+      if (pagingField) {
+        throw new Error(
+          `entity ${message.name}: only one @paging field is allowed, found multiple`,
+        );
+      }
+      if (!isPk && !isUnique) {
+        throw new Error(
+          `entity ${message.name}: @paging field "${name}" must also have @pk or @unique`,
+        );
+      }
+      if (type !== "string" && type !== "number") {
+        throw new Error(
+          `entity ${message.name}: @paging field "${name}" must be string/int32/int64 (got ${type})`,
+        );
+      }
+      pagingField = spec;
+    }
   }
 
   if (!pkField) return null;
@@ -234,13 +316,66 @@ function parseEntity(message) {
     Fields: fields,
     PKField: pkField,
     UniqueFieldsNonPK: uniqueFieldsNonPK,
+    PagingField: pagingField,
+    HasPaging: pagingField != null,
   };
+}
+
+function resolveNonEntityType(message, entitiesByFullName, nonEntityByFullName, reservedNames) {
+  if (entitiesByFullName.has(message.typeName)) {
+    return entitiesByFullName.get(message.typeName).Name;
+  }
+  if (nonEntityByFullName.has(message.typeName)) {
+    return nonEntityByFullName.get(message.typeName).Name;
+  }
+  let candidate = message.name;
+  while (reservedNames.has(candidate) || isNameUsedAsNonEntity(candidate, nonEntityByFullName)) {
+    candidate += "_";
+  }
+  const fields = message.fields.map((f) => {
+    const type = resolveFieldType(f, entitiesByFullName, nonEntityByFullName, reservedNames);
+    const nm = localName(f);
+    return {
+      name: nm,
+      jsonName: f.name,
+      snakeName: camelToSnake(nm),
+      type,
+      isList: f.repeated,
+    };
+  });
+  const entry = { Name: candidate, Fields: fields };
+  nonEntityByFullName.set(message.typeName, entry);
+  return candidate;
+}
+
+function isNameUsedAsNonEntity(name, nonEntityByFullName) {
+  for (const v of nonEntityByFullName.values()) if (v.Name === name) return true;
+  return false;
+}
+
+function resolveFieldType(field, entitiesByFullName, nonEntityByFullName, reservedNames) {
+  const elemType = resolveElementType(field, entitiesByFullName, nonEntityByFullName, reservedNames);
+  return field.repeated ? `${elemType}[]` : elemType;
+}
+
+function resolveElementType(field, entitiesByFullName, nonEntityByFullName, reservedNames) {
+  if (field.message) {
+    return resolveNonEntityType(field.message, entitiesByFullName, nonEntityByFullName, reservedNames);
+  }
+  return scalarTsType(field);
 }
 
 function buildServiceData(service, entitiesByFullName) {
   const serviceName = service.name;
   const kebab = pascalToKebab(serviceName.replace(/Service$/, ""));
   const baseName = serviceName.replace(/Service$/, "");
+
+  const reservedNames = new Set();
+  for (const method of service.methods) {
+    reservedNames.add(`${method.name}Input`);
+    reservedNames.add(`${method.name}Output`);
+  }
+  const nonEntityByFullName = new Map();
 
   const methods = [];
   const usedEntitiesByName = new Map();
@@ -264,41 +399,53 @@ function buildServiceData(service, entitiesByFullName) {
       ReturnsEmpty: false,
       ResponseField: "",
       Http: http,
+      IsBodyMethod: http?.IsBodyMethod ?? false,
+      IsQueryMethod: http?.IsQueryMethod ?? false,
       BodyFields: [],
       PathParamFields: [],
+      QueryFields: [],
+      HasBodyFields: false,
+      HasPathParams: false,
+      HasQueryFields: false,
     };
 
     const pathParamNames = http ? http.PathParams : [];
 
     for (const field of method.input.fields) {
       const fieldName = localName(field);
-      let type = "string";
-      switch (field.scalar) {
-        case 9:
-          type = "string";
-          break;
-        case 5:
-        case 3:
-        case 13:
-        case 4:
-          type = "number";
-          break;
-        case 8:
-          type = "boolean";
-          break;
-        default:
-          type = "string";
-      }
-      const inputField = { name: fieldName, type };
-      m.InputFields.push(inputField);
-      if (pathParamNames.includes(fieldName)) {
-        m.PathParamFields.push(inputField);
+      const tsType = resolveFieldType(field, entitiesByFullName, nonEntityByFullName, reservedNames);
+      const isPath = pathParamNames.includes(fieldName) || pathParamNames.includes(field.name);
+      const isQuery = !isPath && m.IsQueryMethod;
+      const isBody = !isPath && !isQuery;
+      let assignExpr;
+      if (isPath) {
+        assignExpr = `params.${field.name}`;
+      } else if (isQuery) {
+        assignExpr = queryParseExpr(field);
       } else {
-        m.BodyFields.push(inputField);
+        if (field.repeated || field.message) {
+          assignExpr = `(body.${field.name} ?? ${defaultValueExpr(field)}) as ${tsType}`;
+        } else {
+          assignExpr = `body.${field.name} ?? ${defaultValueExpr(field)}`;
+        }
       }
+      const inputField = {
+        name: fieldName,
+        jsonName: field.name,
+        snakeName: camelToSnake(fieldName),
+        type: tsType,
+        isList: field.repeated,
+        queryScalarType: queryScalarType(field),
+        assignExpr,
+      };
+      m.InputFields.push(inputField);
+      if (isPath) m.PathParamFields.push(inputField);
+      else if (isQuery) m.QueryFields.push(inputField);
+      else m.BodyFields.push(inputField);
     }
     m.HasBodyFields = m.BodyFields.length > 0;
     m.HasPathParams = m.PathParamFields.length > 0;
+    m.HasQueryFields = m.QueryFields.length > 0;
 
     if (method.output.fields.length === 1) {
       const resField = method.output.fields[0];
@@ -309,11 +456,8 @@ function buildServiceData(service, entitiesByFullName) {
         m.EntityKebab = ent.Kebab;
         m.ResponseField = localName(resField);
         m.EntityFields = ent.Fields;
-        if (resField.repeated) {
-          m.ReturnsList = true;
-        } else {
-          m.ReturnsEntity = true;
-        }
+        if (resField.repeated) m.ReturnsList = true;
+        else m.ReturnsEntity = true;
         if (!usedEntitiesByName.has(ent.Name)) {
           usedEntitiesByName.set(ent.Name, {
             Name: ent.Name,
@@ -324,17 +468,16 @@ function buildServiceData(service, entitiesByFullName) {
         }
       }
     }
-    if (!m.ReturnsEntity && !m.ReturnsList) {
-      m.ReturnsEmpty = true;
-    }
-    if (m.ReturnsEntity || m.ReturnsList) {
-      anyReturnsEntity = true;
-    }
+    if (!m.ReturnsEntity && !m.ReturnsList) m.ReturnsEmpty = true;
+    if (m.ReturnsEntity || m.ReturnsList) anyReturnsEntity = true;
 
     methods.push(m);
   }
 
   const usedEntities = Array.from(usedEntitiesByName.values()).sort((a, b) =>
+    a.Name.localeCompare(b.Name),
+  );
+  const nonEntityTypes = Array.from(nonEntityByFullName.values()).sort((a, b) =>
     a.Name.localeCompare(b.Name),
   );
 
@@ -346,8 +489,22 @@ function buildServiceData(service, entitiesByFullName) {
     UsecaseVarName: lowerFirst(`${baseName}Usecase`),
     Methods: methods,
     UsedEntities: usedEntities,
+    NonEntityTypes: nonEntityTypes,
     AnyReturnsEntity: anyReturnsEntity,
   };
+}
+
+function queryParseExpr(field) {
+  switch (queryScalarType(field)) {
+    case "string":
+      return `searchParams.get("${field.name}") ?? ""`;
+    case "number":
+      return `Number(searchParams.get("${field.name}") ?? "0")`;
+    case "boolean":
+      return `searchParams.get("${field.name}") === "true"`;
+    default:
+      return `searchParams.get("${field.name}") ?? ""`;
+  }
 }
 
 // ==================== template funcs ====================

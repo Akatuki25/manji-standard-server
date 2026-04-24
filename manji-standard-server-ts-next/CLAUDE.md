@@ -15,11 +15,11 @@ Next.js（App Router） + TypeScript + DDD のフロントエンド + API プロ
 - **ランタイム指定**: Route Handler は `nodejs`（エッジではなく Node）
 - **Proto**: Protocol Buffers + buf（`buf generate` で DDD 層を生成）
 - **コード生成プラグイン**:
-  - `mss-protoc-gen`（独自、`tools/mss-protoc-gen/` 配置、`@bufbuild/protoplugin` 使用）— proto の `@entity` マーカーと service / rpc 宣言から以下を生成:
-    - Entity class / Repository interface / Mock / Postgres Repository 実装（エンティティ由来）
-    - Usecase interface + Input 型、**REST Route Handler**（`src/app/<path>/route.ts`、`@http` アノテーションから URL 解決）、`src/lib/handler-registry.gen.ts`（service 由来）
+  - `mss-protoc-gen`(独自、`tools/mss-protoc-gen/` 配置、`@bufbuild/protoplugin` 使用) — proto の `@entity` マーカーと service / rpc 宣言から以下を生成:
+    - Entity class(Drizzle `pgTable` 内蔵) / Repository interface / Mock / Postgres Repository 実装 / **DTO**(エンティティ由来)
+    - Usecase interface + Input 型、**REST Route Handler**(`src/app/<path>/route.ts`、`@http` アノテーションから URL 解決)、`src/lib/handler-registry.gen.ts`(service 由来)
   - **`protoc-gen-es` / `protoc-gen-connect-es` は採用しない**(REST なので proto メッセージ型は不要)
-- **データストア**: PostgreSQL（Drizzle ORM `drizzle-orm/node-postgres` + `pg`）。docker-compose に同梱
+- **データストア**: PostgreSQL(Drizzle ORM `drizzle-orm/node-postgres` + `pg`)。**`pgTable` 定義は entity ファイル内に同梱**(entity が schema を所有する形)。docker-compose に同梱
 - **テスト方針**: ユニットテストは生成 Mock を使う。結合テストは docker-compose / testcontainers の Postgres
 - **テスト**: Vitest
 - **ビルド**: `next build`（standalone 出力）
@@ -33,23 +33,29 @@ Next.js（App Router） + TypeScript + DDD のフロントエンド + API プロ
   ```
   proto/**/*.proto
     └→ mss-protoc-gen で以下を生成:
-       src/domain/entity/*.gen.ts
+       src/domain/entity/*.gen.ts                  (Entity class + Drizzle pgTable + Row/Insert 型)
        src/domain/repository/*-repository.gen.ts
        src/domain/repository/mock/mock-*-repository.gen.ts
-       src/infra/repository/*-postgres-repository.gen.ts      （Drizzle）
-       src/usecase/*-usecase-interface.gen.ts                           （interface + Input 型）
-       src/app/<path>/route.ts                                 （REST Route Handler、@http 由来）
-       src/lib/handler-registry.gen.ts                         （HandlerDeps + provideHandlerDepsFactory）
+       src/infra/repository/*-postgres-repository.gen.ts (Drizzle)
+       src/dto/*.gen.ts                            (DTO 型 + from<Entity>() 変換関数)
+       src/usecase/*-usecase-interface.gen.ts      (interface + Input 型 + 非 entity 入力 message 型)
+       src/app/<path>/route.ts                     (REST Route Handler、@http 由来)
+       src/lib/handler-registry.gen.ts             (HandlerDeps + provideHandlerDepsFactory)
                              ↓
-  Route Handler (生成) → Usecase interface (生成)
-                              ↑ implements
-                          <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成) → Entity (生成)
-                                                                              ↑
-                                                                   Postgres Repository (生成)
+  Route Handler (生成) ──NextResponse.json──→ DTO (生成)
+        ↓ getHandlerDeps                       ↑ 変換(usecase 内で fromUser など)
+  Usecase interface (生成)                    Entity (生成、pgTable 同梱)
+        ↑ implements                            ↑ Drizzle が直接読み書き
+  <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成)
+                                                     ↑ implements
+                                          Postgres Repository (生成)
   ```
-- **依存方向**: 常に内側（Entity）に向かう
-- **DI**: `src/lib/container.ts` で組み立てた Usecase シングルトンを Route Handler が import
+- **依存方向**: 常に内側(Entity)に向かう
+- **DI**: `src/lib/container.ts` で `provideHandlerDepsFactory(...)` を呼んで遅延初期化を登録。Route Handler は import 時に side-effect で container をロードし、request 時に `getHandlerDeps()` で Usecase を解決する(Next の build フェーズでは DB 接続しない)
 - **パスエイリアス**: `@/*` → `src/*`
+- **DTO 境界**: クライアントへ返す JSON 表現は **DTO 層が一元管理**。Usecase が `User` を `UserDTO` に変換して返し、Route Handler は `NextResponse.json(result)` するだけ。
+- **Entity = Drizzle スキーマ**: 生成 Entity ファイルに `pgTable` 定義 + `<Name>Row` / `<Name>Insert` 型を同梱する。Postgres Repository は entity table を直接 import。
+- **JSON 表現の方針**: DTO のキーは proto field 名(snake_case)に揃える。`@timestamp` は `<name>_unix: number`(Unix 秒)に展開する。Entity 側は TS 慣習で camelCase + `Date` 型を維持する。
 
 ## ディレクトリ構造
 
@@ -58,25 +64,31 @@ manji-standard-server-ts-next/
 ├── src/
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── users/
-│   │   │   │   ├── route.ts         # POST /api/users
-│   │   │   │   └── [id]/route.ts    # GET /api/users/:id
-│   │   │   └── health/route.ts      # GET /api/health
+│   │   │   ├── users/                          # 12 rpc 分の route.ts(生成)
+│   │   │   │   ├── route.ts                    # GET / POST / DELETE /api/users
+│   │   │   │   ├── [id]/route.ts               # GET / PUT / PATCH / DELETE /api/users/:id
+│   │   │   │   ├── bulk/route.ts               # POST / PUT /api/users/bulk
+│   │   │   │   ├── bulk-delete/route.ts        # POST /api/users/bulk-delete
+│   │   │   │   ├── by-email/route.ts           # GET /api/users/by-email
+│   │   │   │   └── cursor/route.ts             # GET /api/users/cursor
+│   │   │   └── health/route.ts                 # GET /api/health(★手書き)
 │   │   ├── layout.tsx
-│   │   └── page.tsx                 # トップ画面
+│   │   └── page.tsx
 │   ├── domain/
-│   │   ├── entity/*.gen.ts                     # 生成（mss-protoc-gen）
-│   │   ├── repository/*-repository.gen.ts      # 生成（interface + エラー）
-│   │   │   └── mock/mock-*.gen.ts              # 生成（テスト用スタブ）
-│   │   └── service/                            # ドメインサービス（手書き）
-│   ├── usecase/                                # アプリケーションサービス（手書き）
-│   ├── infra/repository/*-postgres-repository.gen.ts  # 生成（Drizzle 実装）
+│   │   ├── entity/*.gen.ts                     # 生成(class + Drizzle pgTable 内蔵)
+│   │   ├── repository/*-repository.gen.ts      # 生成(interface + エラー)
+│   │   │   └── mock/mock-*.gen.ts              # 生成(テスト用スタブ)
+│   │   └── service/                            # ドメインサービス(★手書き)
+│   ├── dto/*.gen.ts                            # 生成(DTO 型 + 変換関数)
+│   ├── usecase/                                # *-usecase-interface.gen.ts(生成) + 実装(★手書き)
+│   ├── infra/repository/*-postgres-repository.gen.ts  # 生成(Drizzle 実装)
 │   └── lib/
-│       └── container.ts                        # DI 組み立て
-├── proto/                                      # Protocol Buffers 定義（唯一の手書きソース）
+│       ├── container.ts                        # DI 組み立て(★手書き)
+│       └── handler-registry.gen.ts             # HandlerDeps + getHandlerDeps(生成)
+├── proto/                                      # Protocol Buffers 定義(唯一の手書きソース)
 │   └── user/v1/user.proto
 ├── tools/
-│   └── mss-protoc-gen/                         # 独自プラグイン（`.tpl` テンプレート方式）
+│   └── mss-protoc-gen/                         # 独自プラグイン(`.tpl` テンプレート方式)
 ├── buf.yaml
 ├── buf.gen.yaml
 └── docs/
@@ -85,21 +97,22 @@ manji-standard-server-ts-next/
     └── knowledge/
 ```
 
-## proto アノテーション（mss-protoc-gen が解釈）
+## proto アノテーション(mss-protoc-gen が解釈)
 
-- `// @entity` — メッセージに付与。Entity class / Repository interface / Mock / Postgres 実装の 4 ファイル生成
+- `// @entity` — メッセージに付与。Entity class(pgTable 同梱) / Repository interface / Mock / Postgres 実装 / **DTO** の 5 ファイル生成
 - `// @pk` — フィールドに付与。主キー。`selectByPk` / `delete` / `bulkDelete` が生成
 - `// @unique` — フィールドに付与。`selectBy<Field>` が追加生成
 - `// @email` — フィールドに付与。email 形式バリデーション
 - `// @required` — フィールドに付与。非空バリデーション
-- `// @timestamp` — `int64` フィールドに付与。TS 側で `Date` にマップし、末尾 `Unix` を除去した名前に
-- `// @http METHOD /path` — **rpc に付与**。REST Route Handler 生成用。`{name}` は Next App Router の `[name]` に変換。例: `@http GET /api/users/{id}` → `src/app/api/users/[id]/route.ts` に GET handler が生成
+- `// @timestamp` — `int64` フィールドに付与。TS 側で `Date` にマップし、末尾 `Unix` を除去した名前(`createdAt`)に。DTO では `<snake>_unix: number` に展開
+- `// @paging` — フィールドに付与。cursor pagination の cursor 列。`selectByCursor(limit, after)` が追加生成。`@pk` か `@unique` を併記必須、proto 型は `string` / `int32` / `int64` のみ
+- `// @http METHOD /path` — **rpc に付与**。REST Route Handler 生成用。`{name}` は Next App Router の `[name]` に変換。例: `@http GET /api/users/{id}` → `src/app/api/users/[id]/route.ts` に GET handler が生成。同一 path で複数 HTTP method を持つ場合(GET と DELETE 等)は同じ `route.ts` に複数 handler が emit される
 
 例:
 ```proto
 // @entity
 message User {
-  // @pk
+  // @pk @paging
   string id = 1;
   // @unique @email
   string email = 2;
@@ -110,14 +123,21 @@ message User {
 }
 ```
 
+### Response 形状
+
+- 単一フィールドの response が `@entity` メッセージなら、Usecase は `Promise<<Name>DTO | null>` / `Promise<<Name>DTO[]>` を返す
+- response が空 message なら `Promise<void>`。Route Handler は 204 No Content
+- bulk 系 rpc(`repeated <NonEntityMessage>` を入力に取る)は、非 entity message を usecase ファイル内に TS 型として emit する。`<Method>Input` / `<Method>Output` と名前衝突したらリネームされる。これらの型のキーは proto field 名(snake_case)を保持する
+
 ## REST Route Handler の規約
 
-proto はあくまでドメイン生成源。HTTP 境界では **proto メッセージ型に依存しない** ので、以下の方針で書く:
+Route Handler は **すべて生成物**(`route.ts` 冒頭に `// Code generated by mss-protoc-gen. DO NOT EDIT.`)。手書きで Route Handler を増やすのは `health/route.ts` のような proto 化しないインフラ用途のみ。
 
-- リクエストボディは `await req.json()` で受け取り、必要フィールドを明示的にピック（`body.email ?? ""`）
-- レスポンスは Entity のプロパティを JSON 化して返す（`createdAt` は `Math.floor(user.createdAt.getTime() / 1000)` で Unix 秒に）
-- バリデーションは Entity のファクトリ（`User.create()`）が投げる Error に任せ、Route Handler は `try/catch` でステータスコードに変換
-- ドメイン層のセンチネルエラー（`UserNotFoundError` / `UserAlreadyExistsError` 等の `*.gen.ts` 生成物、あるいは `EmailAlreadyTakenError` のような手書き）を `instanceof` で判別して 404 / 409 等にマップ
+- runtime 指定: `export const runtime = "nodejs"` / `export const dynamic = "force-dynamic"` を自動 emit
+- DI: `import "@/lib/container"` の side-effect で factory 登録、`getHandlerDeps()` で request 時に解決
+- `POST/PUT/PATCH` は `req.json()` で body を読み、`GET/DELETE` は `new URL(req.url).searchParams` で query string を読む
+- バリデーションは Entity のファクトリ(`User.create()`)が投げる Error に任せ、Route Handler は `try/catch` で `toHttpError` を通してステータスコードに変換
+- `*NotFoundError` / `*AlreadyExistsError`(repository 由来)を `instanceof` で 404 / 409 にマップ。`EmailAlreadyTakenError` のような service 層エラーは手書きで足す
 
 ## コーディング規約
 
@@ -140,14 +160,16 @@ proto はあくまでドメイン生成源。HTTP 境界では **proto メッセ
 
 ## 規約上の禁則
 
-- Route Handler を手書きしない（`src/app/<path>/route.ts` は生成物）— 新しいエンドポイントは proto に rpc + `@http` を書いて再生成
-- Route Handler 内で直接 Repository を使わない（生成 Route は Usecase 経由）
+- Route Handler を手書きしない(`src/app/api/<feature>/<path>/route.ts` は生成物)— 新しいエンドポイントは proto に rpc + `@http` を書いて再生成。例外は `health/route.ts` のような proto 化しないインフラ用途のみ
+- Route Handler 内で直接 Repository を使わない(生成 Route は Usecase 経由)
 - `container.ts` 以外で具体的 Repository 実装を import しない
-- Route Handler に長いロジックを書かない（Usecase に抽出）
-- **`*.gen.ts` ファイルと生成された `route.ts` を手動編集しない**（冒頭に "Code generated" コメントあり）
+- Route Handler に長いロジックを書かない(Usecase に抽出)
+- **Usecase は entity を直接返さない**。クライアントへ抜ける戻り値は必ず `from<Name>` で DTO に変換してから返す
+- **Route Handler は DTO を整形しない**。`NextResponse.json(usecaseResult)` だけ。JSON キー / Unix 秒変換の責務は DTO のみ
+- **`*.gen.ts` ファイルと生成された `route.ts` を手動編集しない**(冒頭に "Code generated" コメントあり)
 - proto 変更後は必ず `make proto-gen` を実行
-- Entity に振る舞いを足したい場合は `<kebab>-ext.ts` で拡張する（生成ファイルとは別ファイル）
-- **RPC プロトコル（Connect / gRPC）は採用しない** — REST (`@http`) のみ
+- Entity に振る舞いを足したい場合は `<kebab>-ext.ts` で拡張する(生成ファイルとは別ファイル)
+- **RPC プロトコル(Connect / gRPC)は採用しない** — REST (`@http`) のみ
 
 ## コミット・PR
 

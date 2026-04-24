@@ -3,32 +3,26 @@
 import type { Context } from "hono";
 
 {{range .UsedEntities}}
-import type { {{.Name}} } from "../domain/entity/{{.Kebab}}.gen.js";
 import {
   {{.Name}}NotFoundError,
   {{.Name}}AlreadyExistsError,
 } from "../domain/repository/{{.Kebab}}-repository.gen.js";
 {{- end}}
-import type { {{.UsecaseTypeName}} } from "../usecase/{{.Kebab}}-usecase-interface.gen.js";
+import type {
+  {{.UsecaseTypeName}},
+{{- range .Methods}}
+  {{.InputTypeName}},
+{{- end}}
+{{- range .NonEntityTypes}}
+  {{.Name}},
+{{- end}}
+} from "../usecase/{{.Kebab}}-usecase-interface.gen.js";
 
-{{range .UsedEntities}}
-function {{.LowerFirst}}ToJson(e: {{.Name}}) {
-  return {
-{{- range .Fields}}
-{{- if .isTimestamp}}
-    {{.snakeName}}_unix: Math.floor(e.{{.name}}.getTime() / 1000),
-{{- else}}
-    {{.snakeName}}: e.{{.name}},
-{{- end}}
-{{- end}}
-  };
-}
-{{end}}
 {{range .Methods}}
-{{- if .HasBodyFields}}
+{{- if and .IsBodyMethod .HasBodyFields}}
 type {{.rpcName}}Body = {
 {{- range .BodyFields}}
-  {{.name}}?: {{.type}};
+  {{.jsonName}}?: {{.type}};
 {{- end}}
 };
 {{- end}}
@@ -49,7 +43,7 @@ export class {{.HandlerClassName}} {
 {{- if .Http}}
   // {{.Http.Method}} {{.Http.Path}}
   async {{.lowerName}}(c: Context) {
-{{- if .HasBodyFields}}
+{{- if and .IsBodyMethod .HasBodyFields}}
     let body: {{.rpcName}}Body;
     try {
       body = await c.req.json();
@@ -58,30 +52,23 @@ export class {{.HandlerClassName}} {
     }
 {{- end}}
     try {
-      const input = {
-{{- range .PathParamFields}}
-        {{.name}}: c.req.param("{{.name}}") ?? "",
-{{- end}}
-{{- range .BodyFields}}
-{{- if eq .type "string"}}
-        {{.name}}: body.{{.name}} ?? "",
-{{- end}}
-{{- if eq .type "number"}}
-        {{.name}}: body.{{.name}} ?? 0,
-{{- end}}
-{{- if eq .type "boolean"}}
-        {{.name}}: body.{{.name}} ?? false,
-{{- end}}
+{{- if .HasInputFields}}
+      const input: {{.InputTypeName}} = {
+{{- range .InputFields}}
+        {{.name}}: {{.assignExpr}},
 {{- end}}
       };
+{{- else}}
+      const input = {} as {{.InputTypeName}};
+{{- end}}
 {{- if .ReturnsEntity}}
       const result = await this.usecase.{{.lowerName}}(input);
       if (!result) return c.json({ error: "{{.EntityLowerFirst}} not found" }, 404);
-      return c.json({{.EntityLowerFirst}}ToJson(result), {{if eq .Http.Method "POST"}}201{{else}}200{{end}});
+      return c.json(result, {{if eq .Http.Method "POST"}}201{{else}}200{{end}});
 {{- end}}
 {{- if .ReturnsList}}
       const list = await this.usecase.{{.lowerName}}(input);
-      return c.json(list.map({{.EntityLowerFirst}}ToJson), 200);
+      return c.json(list, {{if eq .Http.Method "POST"}}201{{else}}200{{end}});
 {{- end}}
 {{- if .ReturnsEmpty}}
       await this.usecase.{{.lowerName}}(input);

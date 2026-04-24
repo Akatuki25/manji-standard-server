@@ -4,25 +4,22 @@ import "@/lib/container"; // side-effect: HandlerDeps factory を登録
 import { NextResponse } from "next/server";
 
 
-import type { User } from "@/domain/entity/user.gen";
 import {
   UserNotFoundError,
   UserAlreadyExistsError,
 } from "@/domain/repository/user-repository.gen";
 import { getHandlerDeps } from "@/lib/handler-registry.gen";
+import type {
+  UserUsecase,
+  ListUsersInput,
+  CreateUserInput,
+  DeleteAllUsersInput,
+  CreateUserParams,
+  UpsertUserParams,
+} from "@/usecase/user-usecase-interface.gen";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-
-function userToJson(e: User) {
-  return {
-    id: e.id,
-    email: e.email,
-    name: e.name,
-    createdAtUnix: Math.floor(e.createdAt.getTime() / 1000),
-  };
-}
 
 function toHttpError(err: unknown): NextResponse {
   if (err instanceof UserNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
@@ -32,11 +29,23 @@ function toHttpError(err: unknown): NextResponse {
 }
 
 
+export async function GET(
+  _req: Request,
+) {
+  try {
+    const deps = getHandlerDeps();
+    const input = {} as ListUsersInput;
+    const list = await deps.userUsecase.listUsers(input);
+    return NextResponse.json(list, { status: 200 });
+  } catch (err) {
+    return toHttpError(err);
+  }
+}
+
 type CreateUserBody = {
   email?: string;
   name?: string;
 };
-
 export async function POST(
   req: Request,
 ) {
@@ -48,12 +57,26 @@ export async function POST(
   }
   try {
     const deps = getHandlerDeps();
-    const e = await deps.userUsecase.createUser({
+    const input: CreateUserInput = {
       email: body.email ?? "",
       name: body.name ?? "",
-    });
-    if (!e) return NextResponse.json({ error: "user not found" }, { status: 404 });
-    return NextResponse.json(userToJson(e), { status: 201 });
+    };
+    const result = await deps.userUsecase.createUser(input);
+    if (!result) return NextResponse.json({ error: "user not found" }, { status: 404 });
+    return NextResponse.json(result, { status: 201 });
+  } catch (err) {
+    return toHttpError(err);
+  }
+}
+
+export async function DELETE(
+  _req: Request,
+) {
+  try {
+    const deps = getHandlerDeps();
+    const input = {} as DeleteAllUsersInput;
+    await deps.userUsecase.deleteAllUsers(input);
+    return new NextResponse(null, { status: 204 });
   } catch (err) {
     return toHttpError(err);
   }

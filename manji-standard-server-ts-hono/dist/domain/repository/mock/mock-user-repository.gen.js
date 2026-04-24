@@ -12,5 +12,6 @@ export class MockUserRepository {
     delete = vi.fn(async () => { });
     bulkDelete = vi.fn(async () => { });
     deleteAll = vi.fn(async () => { });
+    selectByCursor = vi.fn(async () => []);
 }
 //# sourceMappingURL=mock-user-repository.gen.js.map

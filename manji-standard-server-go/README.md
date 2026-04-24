@@ -11,8 +11,49 @@ Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロ�
 make install-tools   # buf + protoc プラグインをインストール
 make proto-gen       # proto からコード生成
 go mod tidy          # 依存解決
+cp .env.example .env.local  # 起動前に環境変数ファイルを用意（APP_ENV=local で読まれる）
 make run             # ローカル起動（:8080）
 ```
+
+## 共通ユーティリティ（`pkg/util/`）
+
+### `env` — 環境変数ローダー
+
+```go
+import "github.com/example/manji-standard-server-go/pkg/util/env"
+
+env.AppEnv()   // "local" | "dev" | "staging" | "prod"
+env.DBHost(), env.DBPort(), env.DBUser(), env.DBPassword(), env.DBName()
+env.Port()     // ":8080" (default)
+```
+
+起動時に `APP_ENV` を見て `.env.<APP_ENV>` を読み込む（未設定なら `local`）。必須キー欠落時は getter 呼び出し時に panic。
+
+### `logger` — 構造化ロガー（`log/slog`）
+
+```go
+import "github.com/example/manji-standard-server-go/pkg/util/logger"
+
+logger.Init()                              // main の最初に 1 度
+logger.Info(ctx, "msg", "user_id", uid)    // ctx に積んだ attrs も展開
+ctx = logger.WithAttrs(ctx, slog.String("request_id", rid))
+```
+
+`local`/`dev` → text / stderr / debug、`staging`/`prod` → JSON / stdout / info。
+
+### `tx` — トランザクション境界
+
+```go
+import "github.com/example/manji-standard-server-go/pkg/util/tx"
+
+tx.Init(db)                                             // main で 1 度
+err := tx.Run(ctx, func(ctx context.Context) error {    // Usecase 層で境界を張る
+    if err := repoA.Insert(ctx, a); err != nil { return err }
+    return repoB.Insert(ctx, b)                         // 同一 tx で実行される
+})
+```
+
+生成された Repository は内部で `tx.From(ctx)` を呼ぶので、`tx.Run` の中では自動的に同一トランザクションを使う。`tx.Run` の外で呼ばれた場合は default pool + `slog.Warn` 出力。
 
 ## エンドポイント (REST)
 
@@ -85,6 +126,18 @@ User のような新ドメイン概念（例: `Order`）を追加する。
 3. `pkg/domain/service/order_service.go` を手書き(ビジネスルール)
 4. `pkg/usecase/order_usecase.go` に `OrderUsecaseImpl` を手書き(生成 interface を実装)
 5. `cmd/api/main.go` の `di.NewHandlers(...)` 呼び出しに `orderUsecase` を追加
+
+#### proto アノテーション（mss-protoc-gen が解釈）
+
+- `// @entity` — メッセージに付与。Entity / Repository interface / Mock / Postgres 実装の 4 ファイルが生成される
+- `// @pk` — フィールドに付与。主キー。`SelectByPK` / `Delete` / `BulkDelete` が生成される
+- `// @unique` — フィールドに付与。`SelectBy<Field>` が追加生成される
+- `// @email` — フィールドに付与。email 形式バリデーション
+- `// @required` — フィールドに付与。非空バリデーション
+- `// @timestamp` — `int64` フィールドに付与。Entity 側で `time.Time` にマップ
+- `// @paging` — フィールドに付与。`SelectByCursor(ctx, limit, after *T)` が追加生成される。ASC 固定。`@pk` または `@unique` を持つ `int64 / int32 / string` 型フィールドでのみ許可、1 message に 1 個まで
+- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。`{name}` は `r.PathValue("name")` で取り出す
+
 
 ### 既存エンティティにフィールドを追加したい
 
@@ -195,8 +248,8 @@ HTTP リクエストは生成 Handler が JSON を parse → Usecase 実装に�
 Repository の本番実装は proto から生成された **PostgreSQL + GORM 版**（`pkg/infra/repository/*_postgres_repository.gen.go`）に統一しています。InMemory 実装は採用しません。
 
 - **ユニットテスト**: 生成された Mock（`pkg/domain/repository/mock/`）を Service / UseCase のテストに注入
-- **結合テスト**: docker-compose または testcontainers で起動した PostgreSQL に `NewPostgresUserRepository(db)` で接続
-- **本番**: 同じ `NewPostgresUserRepository(db)`。DSN は環境変数
+- **結合テスト**: docker-compose または testcontainers で起動した PostgreSQL に接続し `tx.Init(db)` を呼んでから `NewPostgresUserRepository()` で取得
+- **本番**: 同じ `NewPostgresUserRepository()`。DB 接続情報は `env.DB*()` から
 
 ### 配線例（`cmd/api/main.go`）
 
@@ -206,12 +259,19 @@ import (
     "gorm.io/gorm"
 
     infrarepo "github.com/example/manji-standard-server-go/pkg/infra/repository"
+    "github.com/example/manji-standard-server-go/pkg/util/env"
+    "github.com/example/manji-standard-server-go/pkg/util/logger"
+    "github.com/example/manji-standard-server-go/pkg/util/tx"
 )
 
-db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
+logger.Init()
+dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+    env.DBHost(), env.DBPort(), env.DBUser(), env.DBPassword(), env.DBName())
+db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
 if err != nil { log.Fatal(err) }
+tx.Init(db)
 if err := infrarepo.AutoMigrateUser(db); err != nil { log.Fatal(err) }
-userRepo := infrarepo.NewPostgresUserRepository(db)
+userRepo := infrarepo.NewPostgresUserRepository()
 ```
 
 ### 別 DB（MySQL / Redis / MongoDB）へ移管する場合

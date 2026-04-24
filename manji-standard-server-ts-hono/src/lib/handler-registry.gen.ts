@@ -15,6 +15,16 @@ export type HandlerDeps = {
 // Hono アプリに全サービスの REST ルートを登録する。
 export function registerHandlers(app: Hono, deps: HandlerDeps): void {
   const userHandler = new UserRestHandler(deps.userUsecase);
-  app.post("/api/users", (c) => userHandler.createUser(c));
+  app.get("/api/users", (c) => userHandler.listUsers(c));
+  app.get("/api/users/cursor", (c) => userHandler.listUsersByCursor(c));
+  app.get("/api/users/by-email", (c) => userHandler.getUserByEmail(c));
   app.get("/api/users/:id", (c) => userHandler.getUser(c));
+  app.post("/api/users", (c) => userHandler.createUser(c));
+  app.post("/api/users/bulk", (c) => userHandler.bulkCreateUsers(c));
+  app.put("/api/users/bulk", (c) => userHandler.bulkUpsertUsers(c));
+  app.put("/api/users/:id", (c) => userHandler.upsertUser(c));
+  app.patch("/api/users/:id", (c) => userHandler.updateUser(c));
+  app.post("/api/users/bulk-delete", (c) => userHandler.bulkDeleteUsers(c));
+  app.delete("/api/users/:id", (c) => userHandler.deleteUser(c));
+  app.delete("/api/users", (c) => userHandler.deleteAllUsers(c));
 }

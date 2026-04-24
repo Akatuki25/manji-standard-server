@@ -16,4 +16,5 @@ export class MockUserRepository implements UserRepository {
   delete = vi.fn<(id: string) => Promise<void>>(async () => {});
   bulkDelete = vi.fn<(ids: string[]) => Promise<void>>(async () => {});
   deleteAll = vi.fn<() => Promise<void>>(async () => {});
+  selectByCursor = vi.fn<(limit: number, after: string | null) => Promise<User[]>>(async () => []);
 }

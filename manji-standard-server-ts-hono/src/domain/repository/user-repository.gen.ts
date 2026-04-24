@@ -28,4 +28,5 @@ export interface UserRepository {
   delete(id: string): Promise<void>;
   bulkDelete(ids: string[]): Promise<void>;
   deleteAll(): Promise<void>;
+  selectByCursor(limit: number, after: string | null): Promise<User[]>;
 }

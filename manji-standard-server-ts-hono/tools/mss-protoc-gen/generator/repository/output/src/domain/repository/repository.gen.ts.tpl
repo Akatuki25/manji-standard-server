@@ -30,4 +30,7 @@ export interface {{.Name}}Repository {
   delete({{.PKField.name}}: {{.PKField.type}}): Promise<void>;
   bulkDelete({{.PKField.name}}s: {{.PKField.type}}[]): Promise<void>;
   deleteAll(): Promise<void>;
+{{- if .HasPaging}}
+  selectByCursor(limit: number, after: {{.PagingField.type}} | null): Promise<{{.Name}}[]>;
+{{- end}}
 }

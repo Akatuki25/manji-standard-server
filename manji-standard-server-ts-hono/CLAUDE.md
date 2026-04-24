@@ -11,12 +11,12 @@ TypeScript + Hono + DDD + REST のバックエンドプロジェクト。
 - **Proto**: Protocol Buffers + buf(`buf generate` でドメイン層〜ハンドラまで生成)
 - **コード生成プラグイン**:
   - `mss-protoc-gen`(独自、`tools/mss-protoc-gen/` 配置、`@bufbuild/protoplugin` 使用) — proto の `@entity` / `@http` マーカーから以下を生成:
-    - Entity / Repository interface / Mock / Postgres Repository 実装(エンティティ由来)
+    - Entity(Drizzle `pgTable` 内蔵) / Repository interface / Mock / Postgres Repository 実装 / **DTO**(エンティティ由来)
     - Usecase interface + Input 型、REST Handler クラス(Hono の `Context` を受ける)、`src/lib/handler-registry.gen.ts` の DI 登録関数(service 由来)
   - **`@bufbuild/protoc-gen-es` / `@connectrpc/protoc-gen-connect-es` は採用しない**(REST なので proto メッセージ型は不要)
 - **HTTP フレームワーク**: Hono v4(ネイティブの routing `app.get` / `app.post` で直接登録)
 - **HTTP サーバー**: `@hono/node-server` の `serve()`
-- **データストア**: PostgreSQL（Drizzle ORM または TypeORM を予定。現状は生成テンプレート未整備 → Go 版を先行実装）
+- **データストア**: PostgreSQL(Drizzle ORM `drizzle-orm/node-postgres` + `pg`)。**`pgTable` 定義は entity ファイル内に同梱**(entity が schema を所有する形)
 - **テスト方針**: ユニットテストは生成 Mock を使う。結合テストは docker-compose / testcontainers の Postgres に接続
 - **テスト**: Vitest
 - **ビルド**: tsc
@@ -30,43 +30,50 @@ TypeScript + Hono + DDD + REST のバックエンドプロジェクト。
   ```
   proto/**/*.proto
     └→ mss-protoc-gen で以下を生成:
-       src/domain/entity/*.gen.ts
+       src/domain/entity/*.gen.ts            (Entity class + Drizzle pgTable + Row/Insert 型)
        src/domain/repository/*-repository.gen.ts
        src/domain/repository/mock/mock-*-repository.gen.ts
        src/infra/repository/*-postgres-repository.gen.ts
-       src/usecase/*-usecase-interface.gen.ts           (interface + Input 型)
-       src/handler/*-handler.gen.ts                     (REST Handler クラス、Hono の Context を受ける)
-       src/lib/handler-registry.gen.ts                  (registerHandlers + HandlerDeps 型)
+       src/dto/*.gen.ts                       (DTO 型 + from<Entity>() 変換関数)
+       src/usecase/*-usecase-interface.gen.ts (interface + Input 型 + 非 entity 入力 message 型)
+       src/handler/*-handler.gen.ts           (Hono REST Handler クラス)
+       src/lib/handler-registry.gen.ts        (registerHandlers + HandlerDeps 型)
                              ↓
-  Handler (生成) → Usecase interface (生成)
-                      ↑ implements
-                  <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成) → Entity (生成)
-                                                                     ↑
-                                                          Postgres Repository (生成)
+  Handler (生成) ──c.json──→ DTO (生成)
+        ↓ 呼び出し           ↑ 変換(usecase 内で fromUser など)
+  Usecase interface (生成)   Entity (生成、pgTable 同梱)
+        ↑ implements           ↑ Drizzle が直接読み書き
+  <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成)
+                                                     ↑ implements
+                                          Postgres Repository (生成)
   ```
-- **依存方向**: 常に内側（Entity）に向かう。Entity は他層を import しない。
-- **DI**: コンストラクタ注入（`src/main.ts` で組み立て）
+- **依存方向**: 常に内側(Entity)に向かう。Entity は他層を import しない。
+- **DI**: コンストラクタ注入(`src/main.ts` で組み立て)
+- **DTO 境界**: クライアントへ返す JSON 表現は **DTO 層が一元管理**。Usecase が `User` を `UserDTO` に変換して返し、Handler は `c.json(result)` だけ。Entity 側に JSON シリアライズ責務は持たせない。
+- **Entity = Drizzle スキーマ**: 生成 Entity ファイルに `pgTable` 定義 + `<Name>Row` / `<Name>Insert` 型を同梱する。Postgres Repository は entity table を直接 import して使う(中間モデルや手動 row→entity 変換は最小限)。
+- **JSON 表現の方針**: DTO のキーは proto field 名(snake_case)に揃える。`@timestamp` は `<name>_unix: number`(Unix 秒)に展開する。Entity 側は TS 慣習で camelCase + `Date` 型を維持する。
 
 ## ディレクトリ構造
 
 ```
 manji-standard-server-ts-hono/
 ├── src/
-│   ├── main.ts                           # エントリポイント(DI + Hono serve)
+│   ├── main.ts                              # エントリポイント(DI + Hono serve)
 │   ├── domain/
-│   │   ├── entity/*.gen.ts               # 生成
-│   │   ├── repository/*-repository.gen.ts# 生成(interface)
-│   │   │   └── mock/mock-*.gen.ts        # 生成(テスト用スタブ)
-│   │   └── service/                      # ドメインサービス(★手書き)
-│   ├── usecase/                          # *-usecase-interface.gen.ts(interface、生成) + 実装(★手書き)
-│   ├── handler/                          # *-handler.gen.ts(REST Handler、生成)
+│   │   ├── entity/*.gen.ts                  # 生成(class + Drizzle pgTable 内蔵)
+│   │   ├── repository/*-repository.gen.ts   # 生成(interface)
+│   │   │   └── mock/mock-*.gen.ts           # 生成(テスト用スタブ)
+│   │   └── service/                         # ドメインサービス(★手書き)
+│   ├── dto/*.gen.ts                         # 生成(DTO 型 + 変換関数)
+│   ├── usecase/                             # *-usecase-interface.gen.ts(生成) + 実装(★手書き)
+│   ├── handler/                             # *-handler.gen.ts(REST Handler、生成)
 │   ├── infra/
 │   │   └── repository/*-postgres-repository.gen.ts # 生成(Drizzle)
 │   └── lib/
-│       └── handler-registry.gen.ts       # registerHandlers + HandlerDeps(生成)
-├── proto/                                # Protocol Buffers 定義（唯一の手書きソース）
+│       └── handler-registry.gen.ts          # registerHandlers + HandlerDeps(生成)
+├── proto/                                   # Protocol Buffers 定義(唯一の手書きソース)
 ├── tools/
-│   └── mss-protoc-gen/             # 独自プラグイン（`.tpl` テンプレート方式）
+│   └── mss-protoc-gen/                      # 独自プラグイン(`.tpl` テンプレート方式)
 ├── buf.yaml
 ├── buf.gen.yaml
 └── docs/
@@ -75,21 +82,22 @@ manji-standard-server-ts-hono/
     └── knowledge/
 ```
 
-## proto アノテーション（mss-protoc-gen が解釈）
+## proto アノテーション(mss-protoc-gen が解釈)
 
-- `// @entity` — メッセージに付与。Entity class / Repository interface / Mock / Postgres 実装の 4 ファイル生成
+- `// @entity` — メッセージに付与。Entity class(pgTable 同梱) / Repository interface / Mock / Postgres 実装 / **DTO** の 5 ファイル生成
 - `// @pk` — フィールドに付与。主キー。`selectByPk` / `delete` / `bulkDelete` が生成
 - `// @unique` — フィールドに付与。`selectBy<Field>` が追加生成
 - `// @email` — フィールドに付与。email 形式バリデーション
 - `// @required` — フィールドに付与。非空バリデーション
-- `// @timestamp` — `int64` フィールドに付与。TS 側で `Date` にマップし、末尾 `Unix` を除去した名前に
-- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。Hono 側では `{name}` が `:name` に変換されて `c.req.param("name")` で取り出せる
+- `// @timestamp` — `int64` フィールドに付与。TS 側で `Date` にマップし、末尾 `Unix` を除去した名前(`createdAt`)に。DTO では `<snake>_unix: number` に展開
+- `// @paging` — フィールドに付与。cursor pagination の cursor 列。`selectByCursor(limit, after)` が追加生成。`@pk` か `@unique` を併記必須、proto 型は `string` / `int32` / `int64` のみ
+- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。Hono 側では `{name}` が `:name` に変換され `c.req.param("name")` で取り出す。`POST/PUT/PATCH` は body decode、`GET/DELETE` は query string から組み立てる
 
 例:
 ```proto
 // @entity
 message User {
-  // @pk
+  // @pk @paging
   string id = 1;
   // @unique @email
   string email = 2;
@@ -99,6 +107,12 @@ message User {
   int64 created_at_unix = 4;
 }
 ```
+
+### Response 形状
+
+- 単一フィールドの response が `@entity` メッセージなら、Usecase は `Promise<<Name>DTO | null>` / `Promise<<Name>DTO[]>` を返す
+- response が空 message なら `Promise<void>`。Handler は 204 No Content
+- bulk 系 rpc(`repeated <NonEntityMessage>` を入力に取る)は、非 entity message を usecase ファイル内に TS 型として emit する。`<Method>Input` / `<Method>Output` と名前衝突したらリネームされる。これらの型のキーは proto field 名(snake_case)を保持する
 
 ## コーディング規約
 
@@ -125,13 +139,15 @@ message User {
 
 ## 規約上の禁則
 
-- Handler 層から直接 Repository を触らない（必ず UseCase 経由）
-- Entity に副作用を持たせない（永続化は Repository の責務）
+- Handler 層から直接 Repository を触らない(必ず UseCase 経由)
+- Entity に副作用を持たせない(永続化は Repository の責務)
 - `main.ts` 以外で具体的な Repository 実装を import しない
-- **`*.gen.ts` ファイルを手動編集しない**(Entity / Repository / Mock / Postgres 実装 / Usecase interface / REST Handler / handler-registry はすべて proto から生成)
-- Handler を手書き追加しない（複雑な変換ロジックは Usecase 実装に寄せる）
+- **`*.gen.ts` ファイルを手動編集しない**(Entity / DTO / Repository / Mock / Postgres 実装 / Usecase interface / REST Handler / handler-registry はすべて proto から生成)
+- Handler を手書き追加しない(複雑な変換ロジックは Usecase 実装に寄せる)
+- **Usecase は entity を直接返さない**。クライアントへ抜ける戻り値は必ず `from<Name>` で DTO に変換してから返す
+- **Handler は DTO を整形しない**。`c.json(usecaseResult)` だけ。JSON キー / Unix 秒変換の責務は DTO のみ
 - proto 変更後は必ず `make proto-gen` を実行
-- Entity に振る舞いを足したい場合は `<kebab>-ext.ts` で拡張する（生成ファイルとは別ファイル）
+- Entity に振る舞いを足したい場合は `<kebab>-ext.ts` で拡張する(生成ファイルとは別ファイル)
 
 ## コミット・PR
 

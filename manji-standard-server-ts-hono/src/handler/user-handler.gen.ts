@@ -3,28 +3,61 @@
 import type { Context } from "hono";
 
 
-import type { User } from "../domain/entity/user.gen.js";
 import {
   UserNotFoundError,
   UserAlreadyExistsError,
 } from "../domain/repository/user-repository.gen.js";
-import type { UserUsecase } from "../usecase/user-usecase-interface.gen.js";
+import type {
+  UserUsecase,
+  ListUsersInput,
+  ListUsersByCursorInput,
+  GetUserByEmailInput,
+  GetUserInput,
+  CreateUserInput,
+  BulkCreateUsersInput,
+  BulkUpsertUsersInput,
+  UpsertUserInput,
+  UpdateUserInput,
+  BulkDeleteUsersInput,
+  DeleteUserInput,
+  DeleteAllUsersInput,
+  CreateUserParams,
+  UpsertUserParams,
+} from "../usecase/user-usecase-interface.gen.js";
 
 
-function userToJson(e: User) {
-  return {
-    id: e.id,
-    email: e.email,
-    name: e.name,
-    created_at_unix: Math.floor(e.createdAt.getTime() / 1000),
-  };
-}
+
+
 
 
 type CreateUserBody = {
   email?: string;
   name?: string;
 };
+
+type BulkCreateUsersBody = {
+  users?: CreateUserParams[];
+};
+
+type BulkUpsertUsersBody = {
+  users?: UpsertUserParams[];
+};
+
+type UpsertUserBody = {
+  email?: string;
+  name?: string;
+  created_at_unix?: number;
+};
+
+type UpdateUserBody = {
+  email?: string;
+  name?: string;
+};
+
+type BulkDeleteUsersBody = {
+  ids?: string[];
+};
+
 
 
 
@@ -38,6 +71,59 @@ export class UserRestHandler {
     return c.json({ error: message }, 400);
   }
 
+  // GET /api/users
+  async listUsers(c: Context) {
+    try {
+      const input = {} as ListUsersInput;
+      const list = await this.usecase.listUsers(input);
+      return c.json(list, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // GET /api/users/cursor
+  async listUsersByCursor(c: Context) {
+    try {
+      const input: ListUsersByCursorInput = {
+        limit: Number(c.req.query("limit") ?? "0"),
+        afterId: c.req.query("after_id") ?? "",
+      };
+      const list = await this.usecase.listUsersByCursor(input);
+      return c.json(list, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // GET /api/users/by-email
+  async getUserByEmail(c: Context) {
+    try {
+      const input: GetUserByEmailInput = {
+        email: c.req.query("email") ?? "",
+      };
+      const result = await this.usecase.getUserByEmail(input);
+      if (!result) return c.json({ error: "user not found" }, 404);
+      return c.json(result, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // GET /api/users/{id}
+  async getUser(c: Context) {
+    try {
+      const input: GetUserInput = {
+        id: c.req.param("id") ?? "",
+      };
+      const result = await this.usecase.getUser(input);
+      if (!result) return c.json({ error: "user not found" }, 404);
+      return c.json(result, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
   // POST /api/users
   async createUser(c: Context) {
     let body: CreateUserBody;
@@ -47,27 +133,139 @@ export class UserRestHandler {
       return c.json({ error: "invalid body" }, 400);
     }
     try {
-      const input = {
+      const input: CreateUserInput = {
         email: body.email ?? "",
         name: body.name ?? "",
       };
       const result = await this.usecase.createUser(input);
       if (!result) return c.json({ error: "user not found" }, 404);
-      return c.json(userToJson(result), 201);
+      return c.json(result, 201);
     } catch (err) {
       return this.handleError(c, err);
     }
   }
 
-  // GET /api/users/{id}
-  async getUser(c: Context) {
+  // POST /api/users/bulk
+  async bulkCreateUsers(c: Context) {
+    let body: BulkCreateUsersBody;
     try {
-      const input = {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid body" }, 400);
+    }
+    try {
+      const input: BulkCreateUsersInput = {
+        users: (body.users ?? []) as CreateUserParams[],
+      };
+      const list = await this.usecase.bulkCreateUsers(input);
+      return c.json(list, 201);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // PUT /api/users/bulk
+  async bulkUpsertUsers(c: Context) {
+    let body: BulkUpsertUsersBody;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid body" }, 400);
+    }
+    try {
+      const input: BulkUpsertUsersInput = {
+        users: (body.users ?? []) as UpsertUserParams[],
+      };
+      const list = await this.usecase.bulkUpsertUsers(input);
+      return c.json(list, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // PUT /api/users/{id}
+  async upsertUser(c: Context) {
+    let body: UpsertUserBody;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid body" }, 400);
+    }
+    try {
+      const input: UpsertUserInput = {
+        id: c.req.param("id") ?? "",
+        email: body.email ?? "",
+        name: body.name ?? "",
+        createdAtUnix: body.created_at_unix ?? 0,
+      };
+      const result = await this.usecase.upsertUser(input);
+      if (!result) return c.json({ error: "user not found" }, 404);
+      return c.json(result, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // PATCH /api/users/{id}
+  async updateUser(c: Context) {
+    let body: UpdateUserBody;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid body" }, 400);
+    }
+    try {
+      const input: UpdateUserInput = {
+        id: c.req.param("id") ?? "",
+        email: body.email ?? "",
+        name: body.name ?? "",
+      };
+      const result = await this.usecase.updateUser(input);
+      if (!result) return c.json({ error: "user not found" }, 404);
+      return c.json(result, 200);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // POST /api/users/bulk-delete
+  async bulkDeleteUsers(c: Context) {
+    let body: BulkDeleteUsersBody;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid body" }, 400);
+    }
+    try {
+      const input: BulkDeleteUsersInput = {
+        ids: (body.ids ?? []) as string[],
+      };
+      await this.usecase.bulkDeleteUsers(input);
+      return c.body(null, 204);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // DELETE /api/users/{id}
+  async deleteUser(c: Context) {
+    try {
+      const input: DeleteUserInput = {
         id: c.req.param("id") ?? "",
       };
-      const result = await this.usecase.getUser(input);
-      if (!result) return c.json({ error: "user not found" }, 404);
-      return c.json(userToJson(result), 200);
+      await this.usecase.deleteUser(input);
+      return c.body(null, 204);
+    } catch (err) {
+      return this.handleError(c, err);
+    }
+  }
+
+  // DELETE /api/users
+  async deleteAllUsers(c: Context) {
+    try {
+      const input = {} as DeleteAllUsersInput;
+      await this.usecase.deleteAllUsers(input);
+      return c.body(null, 204);
     } catch (err) {
       return this.handleError(c, err);
     }
