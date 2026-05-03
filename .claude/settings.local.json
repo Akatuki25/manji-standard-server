@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go install *)",
+      "Bash(go env *)",
+      "Bash(buf generate *)",
+      "Bash(gofmt *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(go test *)",
+      "Bash(make proto-gen *)",
+      "Bash([ -d \"$d/output/pkg\" ])",
+      "Bash(mv __TRACKED_VAR__/output/pkg __TRACKED_VAR__/output/internal)",
+      "Bash(xargs -0 sed -i '' -e 's|github.com/example/manji-standard-server-go/pkg/domain|github.com/example/manji-standard-server-go/internal/domain|g' -e 's|github.com/example/manji-standard-server-go/pkg/dto|github.com/example/manji-standard-server-go/internal/dto|g' -e 's|github.com/example/manji-standard-server-go/pkg/handler|github.com/example/manji-standard-server-go/internal/handler|g' -e 's|github.com/example/manji-standard-server-go/pkg/infra|github.com/example/manji-standard-server-go/internal/infra|g' -e 's|github.com/example/manji-standard-server-go/pkg/usecase|github.com/example/manji-standard-server-go/internal/usecase|g' -e 's|github.com/example/manji-standard-server-go/pkg/di|github.com/example/manji-standard-server-go/internal/di|g')",
+      "Bash(npm run *)",
+      "Bash(rm -rf src/dto)",
+      "Bash(/opt/homebrew/bin/buf generate *)",
+      "Bash(tsc --noEmit)",
+      "Bash(xargs -0 sed -i '' 's|\\\\.gen\\\\.js\"|.gen\"|g')",
+      "Bash(go run *)",
+      "Bash(git mv *)",
+      "Bash(git -C /Users/taramanjimacbookpro/develop/manji-standard-server/manji-standard-server-go status --short)",
+      "Bash(git -C /Users/taramanjimacbookpro/develop/manji-standard-server/manji-standard-server status --short)",
+      "Bash(git -C /Users/taramanjimacbookpro/develop/manji-standard-server/manji-standard-server-ts-hono status --short)",
+      "Bash(git -C /Users/taramanjimacbookpro/develop/manji-standard-server/manji-standard-server-ts-next status --short)"
+    ]
+  }
+}

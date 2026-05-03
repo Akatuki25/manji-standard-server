@@ -27,14 +27,20 @@ Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロ�
   ```
   Proto (.proto)
    └→ mss-protoc-gen で以下を生成:
-      internal/domain/entity/*.gen.go                       (Entity + GORM タグ)
-      internal/domain/repository/*_repository.gen.go        (interface)
+      internal/domain/entity/*.gen.go                          (Entity + GORM タグ)
+      internal/domain/entity/registry.gen.go                   (var All = []any{...} mss-migration-gen 用)
+      internal/domain/repository/*_repository.gen.go           (interface)
       internal/domain/repository/mock/mock_*_repository.gen.go (テスト用スタブ)
-      internal/infra/repository/*_postgres_repository.gen.go(Postgres + GORM)
-      internal/dto/*.gen.go                                  (DTO + entity → DTO 変換関数)
-      internal/usecase/*_usecase_interface.gen.go            (Usecase interface + Input 型)
-      internal/handler/*_handler.gen.go                      (REST Handler、net/http ベース)
-      internal/di/handlers.gen.go                            (Handlers struct + Register(mux))
+      internal/infra/repository/*_postgres_repository.gen.go   (Postgres + GORM)
+      internal/dto/*.gen.go                                    (DTO + entity → DTO 変換関数)
+      internal/usecase/*_usecase_interface.gen.go              (Usecase interface + Input 型)
+      internal/handler/*_handler.gen.go                        (REST Handler、net/http ベース)
+      internal/di/handlers.gen.go                              (Handlers struct + Register(mux))
+
+  Entity (生成)
+   └→ mss-migration-gen (cmd/mss-migration-gen) で以下を生成:
+      migrations/<YYYYMMDDHHMMSS>_<table>.up.sql               (Postgres up migration、1 entity につき 1 file)
+      migrations/.snapshot.json                                (前回適用 schema、git commit する)
                             ↓
   Handler (生成) ──json.Encode──→ DTO (生成)
        ↓ 呼び出し                  ↑ 変換(usecase 内で dto.From*)
@@ -56,7 +62,8 @@ Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロ�
 manji-standard-server-go/
 ├── cmd/
 │   ├── api/                    # エントリポイント(ワイヤリング + net/http)
-│   └── mss-protoc-gen/         # 独自 protoc プラグイン(DDD 層の自動生成)
+│   ├── mss-protoc-gen/         # 独自 protoc プラグイン(DDD 層の自動生成)
+│   └── mss-migration-gen/      # entity → Postgres up SQL の独自ジェネレータ
 ├── internal/
 │   ├── domain/
 │   │   ├── entity/             # *.gen.go(生成、GORM タグ + TableName 内蔵)
@@ -74,6 +81,7 @@ manji-standard-server-go/
 │   └── util/                   # env / logger / tx(★手書き、横断ユーティリティ)
 ├── proto/                      # Protocol Buffers 定義(唯一の手書きソース)
 │   └── user/v1/user.proto
+├── migrations/                 # Postgres up SQL + .snapshot.json(mss-migration-gen 出力 + ★git commit)
 ├── buf.yaml                    # buf lint / breaking 設定
 ├── buf.gen.yaml                # 生成プラグイン設定
 └── docs/
@@ -127,9 +135,11 @@ message User {
 
 ## よく使うコマンド
 
-- **ツールインストール**: `make install-tools`（buf + protoc プラグイン）
-- **Proto 生成**: `make proto-gen`（proto 変更後は必須）
+- **ツールインストール**: `make install-tools`(buf + protoc プラグイン)
+- **Proto 生成**: `make proto-gen`(proto 変更後は必須)
 - **生成物削除**: `make proto-clean`
+- **Migration 生成**: `make migration-gen`(entity 変更後、Postgres up SQL を `migrations/` に出力)
+- **Migration 生成 (dry-run)**: `make migration-gen-dry`(SQL を標準出力)
 - **ビルド**: `make build`
 - **実行**: `make run`
 - **テスト**: `make test`
@@ -137,12 +147,44 @@ message User {
 - **フォーマット**: `make fmt`
 - **Docker 起動**: `make docker-up`
 
+## Migration 生成 (`cmd/mss-migration-gen`)
+
+Entity の `gorm:` タグから Postgres 向け **up migration SQL** を自動生成する独自ツール。`make migration-gen` で起動。
+
+- **入力**: `internal/domain/entity/registry.gen.go` の `entity.All`(proto 生成物。全 `@entity` 構造体の zero-value ポインタが入る)
+- **状態管理**: `migrations/.snapshot.json`(前回適用した schema を JSON で保持。**git commit する**)
+- **出力**: `migrations/<YYYYMMDDHHMMSS>_<table>.up.sql`(1 entity の差分につき 1 ファイル)
+- **適用**: [`golang-migrate/migrate`](https://github.com/golang-migrate/migrate) を採用想定。`migrate -path migrations -database $DATABASE_URL up`
+- **down は手書き**: 自動生成しない。down が必要な場合は `<同 timestamp>_<table>.down.sql` を手書きする
+
+### 差分判定ルール
+
+| ケース | 出力 |
+|---|---|
+| snapshot が空 / 該当 entity 不在 | `CREATE TABLE` |
+| 既存 entity に新カラム | `ALTER TABLE ... ADD COLUMN` |
+| 既存 entity からカラム消滅 | `ALTER TABLE ... DROP COLUMN` (WARNING コメント付き) |
+| 型 / NOT NULL / unique 変化 | `ALTER COLUMN` / `ADD CONSTRAINT` / `DROP CONSTRAINT` |
+| entity が消滅 | `DROP TABLE` (WARNING コメント付き) |
+
+### 規約
+
+- **CASCADE は使わない**: `DROP TABLE` / `DROP COLUMN` で依存があれば失敗する。FK 参照や view からの依存は手動で剥がしてから適用
+- **DEFAULT は使わない**: gorm タグの `default:` は無視される。NOT NULL カラムを後から追加する場合は **2 段階**(NULL 許容で追加 → 値を埋める → NOT NULL 化)が必要、生成 SQL に WARNING コメントが入る
+- **危険操作のガード**: NOT NULL 追加 / DROP COLUMN / DROP TABLE / 型変更には `-- WARNING:` ヘッダが付与される。確認のうえ手動で確認・必要なら修正してから commit
+- **snapshot とコードの整合性**: `migrations/.snapshot.json` は entity 状態の真実。手動で migration SQL を書いた場合、snapshot を手で同期しないと次回 diff で差分が再出現する
+
+### `AutoMigrate` との使い分け
+
+`internal/infra/repository/*_postgres_repository.gen.go` には `AutoMigrate<Name>(db *gorm.DB)` も生成されているが、**開発・テスト・integration test 用のスキーマ同期ヘルパー**。本番デプロイは `migrations/*.up.sql` を `golang-migrate` で適用するのが正。`AutoMigrate` を本番起動時に呼ばない。
+
 ## 規約上の禁則
 
 - `cmd/api/main.go` 以外で具体的な Repository 実装を import しない(依存注入は main でのみ)
 - Service / UseCase 層から直接 DB に触らない(Repository 経由)
 - Entity に依存性を持たせない(GORM タグ + バリデーションロジックのみ。他層を import しない)
-- **`*.gen.go` ファイルを手動編集しない**(Entity / DTO / Repository / Mock / Postgres 実装 / Usecase interface / REST Handler / DI 配線はすべて proto から生成)
+- **`*.gen.go` ファイルを手動編集しない**(Entity / DTO / Repository / Mock / Postgres 実装 / Usecase interface / REST Handler / DI 配線 / entity registry はすべて proto から生成)
+- **`migrations/*.up.sql` と `migrations/.snapshot.json` の関係を壊さない**: SQL を手書き修正したら snapshot も手動で同期する。snapshot だけ書き換えて差分を消すのは厳禁(本番 DB と乖離する)
 - Handler を手書き追加しない(生成物で十分、複雑な変換が必要なら Usecase 実装に寄せる)
 - **Usecase は entity を直接返さない**。クライアントへ抜ける戻り値は必ず `dto.From<Name>` で DTO に変換してから返す
 - **Handler は DTO の整形をしない**。`json.Encode(usecaseResult)` だけ。json タグの責務は DTO のみ

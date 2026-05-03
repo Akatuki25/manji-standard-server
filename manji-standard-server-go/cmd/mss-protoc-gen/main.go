@@ -141,6 +141,12 @@ var projectKinds = []projectKind{
 		outPath:  "internal/di/handlers.gen.go",
 		importAs: goImportDI,
 	},
+	{
+		name:     "entity_registry",
+		tplPath:  "generator/entity_registry/output/internal/domain/entity/registry.gen.go.tpl",
+		outPath:  "internal/domain/entity/registry.gen.go",
+		importAs: goImportEntity,
+	},
 }
 
 // ==================== data types ====================
@@ -331,19 +337,39 @@ func main() {
 			}
 		}
 
-		// Pass 4: project kind（di）を一度だけ実行
-		if len(allServices) > 0 {
-			// service 名で安定ソート
-			sort.Slice(allServices, func(i, j int) bool { return allServices[i].ServiceName < allServices[j].ServiceName })
-			di := tplDI{
-				Services:      allServices,
-				ImportUsecase: goImportUsecase,
-				ImportHandler: goImportHandler,
-			}
-			for _, kind := range projectKinds {
-				if err := execTpl(gen, tmpls[kind.name], kind.outPath, kind.importAs, di); err != nil {
-					return fmt.Errorf("%s: %w", kind.name, err)
+		// Pass 4: project kind を実行(kind ごとにデータ構造が異なる)。
+		// entity_registry は entity が 1 つでもあれば必ず出す。di は service が 1 つ以上あるときのみ。
+		var entityList []tplEntityRef
+		for _, e := range entitiesByMsg {
+			entityList = append(entityList, tplEntityRef{Name: e.Name, LowerFirst: lowerFirst(e.Name), SnakeName: e.SnakeName})
+		}
+		sort.Slice(entityList, func(i, j int) bool { return entityList[i].Name < entityList[j].Name })
+
+		sort.Slice(allServices, func(i, j int) bool { return allServices[i].ServiceName < allServices[j].ServiceName })
+		di := tplDI{
+			Services:      allServices,
+			ImportUsecase: goImportUsecase,
+			ImportHandler: goImportHandler,
+		}
+
+		for _, kind := range projectKinds {
+			var data any
+			switch kind.name {
+			case "di":
+				if len(allServices) == 0 {
+					continue
 				}
+				data = di
+			case "entity_registry":
+				if len(entityList) == 0 {
+					continue
+				}
+				data = struct{ Entities []tplEntityRef }{Entities: entityList}
+			default:
+				return fmt.Errorf("unknown project kind: %s", kind.name)
+			}
+			if err := execTpl(gen, tmpls[kind.name], kind.outPath, kind.importAs, data); err != nil {
+				return fmt.Errorf("%s: %w", kind.name, err)
 			}
 		}
 

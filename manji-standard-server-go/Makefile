@@ -4,7 +4,7 @@ BUF_VERSION := v1.45.0
 
 .DEFAULT_GOAL := help
 .PHONY: help build run test lint fmt tidy docker-build docker-up docker-down clean \
-        install-tools proto-gen proto-clean
+        install-tools proto-gen proto-clean migration-gen migration-gen-dry
 
 help: ## ターゲット一覧
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -28,9 +28,10 @@ fmt: ## フォーマット
 tidy: ## go.sum 整理
 	go mod tidy
 
-install-tools: ## buf + mss-protoc-gen をインストール
+install-tools: ## buf + mss-protoc-gen + mss-migration-gen をインストール
 	go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 	go install ./cmd/mss-protoc-gen
+	go install ./cmd/mss-migration-gen
 
 proto-gen: ## proto から Go コードを生成（gen/ 配下）
 	PATH="$$(go env GOPATH)/bin:$$PATH" buf generate
@@ -38,6 +39,12 @@ proto-gen: ## proto から Go コードを生成（gen/ 配下）
 
 proto-clean: ## 生成コードを削除
 	rm -rf gen/
+
+migration-gen: ## entity から Postgres up migration SQL を生成 (snapshot 差分ベース)
+	go run ./cmd/mss-migration-gen
+
+migration-gen-dry: ## migration-gen の dry-run (SQL を標準出力に出すだけ)
+	go run ./cmd/mss-migration-gen -dry-run
 
 docker-build: ## Docker イメージビルド
 	docker build -t manji-standard-server-go:latest .

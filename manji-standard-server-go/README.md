@@ -9,10 +9,13 @@ Go + DDD + クリーンアーキテクチャ + REST のバックエンドプロ�
 
 ```bash
 make install-tools   # buf + protoc プラグインをインストール
-make proto-gen       # proto からコード生成
+make proto-gen       # proto からコード生成 (entity / repository / handler / usecase / dto / DI)
+make migration-gen   # entity の gorm タグから Postgres up SQL を生成 (初回 = CREATE TABLE)
 go mod tidy          # 依存解決
-cp .env.example .env.local  # 起動前に環境変数ファイルを用意（APP_ENV=local で読まれる）
-make run             # ローカル起動（:8080）
+cp .env.example .env.local  # 起動前に環境変数ファイルを用意 (APP_ENV=local で読まれる)
+# migration を本番に適用する場合は golang-migrate を別途インストール:
+#   migrate -path migrations -database "$DATABASE_URL" up
+make run             # ローカル起動 (:8080)
 ```
 
 ## 共通ユーティリティ（`pkg/util/`）
@@ -57,7 +60,23 @@ err := tx.Run(ctx, func(ctx context.Context) error {    // Usecase 層で境界�
 
 ## エンドポイント (REST)
 
-URL は proto の rpc 毎に `@http METHOD /path` アノテーションで宣言済み。生成物の `pkg/di/handlers.gen.go` が `mux.HandleFunc` で登録する。
+URL は proto の rpc 毎に `@http METHOD /path` アノテーションで宣言済み。生成物の `internal/di/handlers.gen.go` が `mux.HandleFunc` で登録する。レスポンスは `internal/dto/*.gen.go` の DTO を `json.Encode` した snake_case JSON。
+
+| Method | Path | RPC |
+|---|---|---|
+| GET | `/api/users` | `ListUsers` |
+| GET | `/api/users/cursor` | `ListUsersByCursor` (`?limit=&after_id=`) |
+| GET | `/api/users/by-email` | `GetUserByEmail` (`?email=`) |
+| GET | `/api/users/{id}` | `GetUser` |
+| POST | `/api/users` | `CreateUser` |
+| POST | `/api/users/bulk` | `BulkCreateUsers` |
+| PUT | `/api/users/bulk` | `BulkUpsertUsers` |
+| PUT | `/api/users/{id}` | `UpsertUser` |
+| PATCH | `/api/users/{id}` | `UpdateUser` |
+| POST | `/api/users/bulk-delete` | `BulkDeleteUsers` |
+| DELETE | `/api/users/{id}` | `DeleteUser` |
+| DELETE | `/api/users` | `DeleteAllUsers` |
+| GET | `/health` | (手書き) |
 
 ```bash
 # ユーザー作成
@@ -67,6 +86,9 @@ curl -X POST http://localhost:8080/api/users \
 
 # ユーザー取得
 curl http://localhost:8080/api/users/<uuid>
+
+# cursor pagination
+curl 'http://localhost:8080/api/users/cursor?limit=20&after_id=<last-id>'
 
 # ヘルスチェック
 curl http://localhost:8080/health
@@ -101,13 +123,13 @@ make docker-down     # 停止
 
 ### 新しいエンティティを追加したい
 
-User のような新ドメイン概念（例: `Order`）を追加する。
+User のような新ドメイン概念(例: `Order`)を追加する。
 
 1. `proto/order/v1/order.proto` を作成し、`// @entity` マーカー付きで定義。rpc には `// @http METHOD /path` を付ける
    ```proto
    // @entity
    message Order {
-     // @pk
+     // @pk @paging
      string id = 1;
      // @unique
      string order_number = 2;
@@ -122,31 +144,44 @@ User のような新ドメイン概念（例: `Order`）を追加する。
      rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
    }
    ```
-2. `make proto-gen` → `entity/order.gen.go` / `repository/order_repository.gen.go` / `infra/repository/order_postgres_repository.gen.go` / `usecase/order_usecase_interface.gen.go` / `handler/order_handler.gen.go` / `di/handlers.gen.go` が生成
-3. `pkg/domain/service/order_service.go` を手書き(ビジネスルール)
-4. `pkg/usecase/order_usecase.go` に `OrderUsecaseImpl` を手書き(生成 interface を実装)
-5. `cmd/api/main.go` の `di.NewHandlers(...)` 呼び出しに `orderUsecase` を追加
+2. `make proto-gen` → 以下が生成される:
+   - `internal/domain/entity/order.gen.go` (構造体 + GORM タグ)
+   - `internal/domain/entity/registry.gen.go` (`entity.All` に `&Order{}` が追加される)
+   - `internal/domain/repository/order_repository.gen.go`
+   - `internal/domain/repository/mock/mock_order_repository.gen.go`
+   - `internal/infra/repository/order_postgres_repository.gen.go`
+   - `internal/dto/order.gen.go` (`OrderDTO` + `FromOrder` / `FromOrders`)
+   - `internal/usecase/order_usecase_interface.gen.go`
+   - `internal/handler/order_handler.gen.go`
+   - `internal/di/handlers.gen.go`
+3. `make migration-gen` → `migrations/<YYYYMMDDHHMMSS>_create_orders.up.sql` が出る + `migrations/.snapshot.json` に orders が追加される(両方 git commit する)
+4. `internal/domain/service/order_service.go` を手書き(ビジネスルール)
+5. `internal/usecase/order_usecase.go` に `OrderUsecaseImpl` を手書き(生成 interface を実装。戻り値は `*dto.OrderDTO` / `[]*dto.OrderDTO` で、`dto.FromOrder*` で entity から変換)
+6. `cmd/api/main.go` の `di.NewHandlers(...)` 呼び出しに `orderUsecase` を追加
 
-#### proto アノテーション（mss-protoc-gen が解釈）
+#### proto アノテーション (mss-protoc-gen が解釈)
 
-- `// @entity` — メッセージに付与。Entity / Repository interface / Mock / Postgres 実装の 4 ファイルが生成される
+- `// @entity` — メッセージに付与。Entity / DTO / Repository interface / Mock / Postgres 実装の **5 ファイル**が生成される + `entity.All` registry に追加される
 - `// @pk` — フィールドに付与。主キー。`SelectByPK` / `Delete` / `BulkDelete` が生成される
 - `// @unique` — フィールドに付与。`SelectBy<Field>` が追加生成される
 - `// @email` — フィールドに付与。email 形式バリデーション
 - `// @required` — フィールドに付与。非空バリデーション
-- `// @timestamp` — `int64` フィールドに付与。Entity 側で `time.Time` にマップ
+- `// @timestamp` — `int64` フィールドに付与。Entity 側で `time.Time` にマップ。DTO では `<name>_unix: int64` に展開
 - `// @paging` — フィールドに付与。`SelectByCursor(ctx, limit, after *T)` が追加生成される。ASC 固定。`@pk` または `@unique` を持つ `int64 / int32 / string` 型フィールドでのみ許可、1 message に 1 個まで
-- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。`{name}` は `r.PathValue("name")` で取り出す
+- `// @http METHOD /path` — **rpc に付与**。REST Handler の URL 登録用(例: `@http GET /api/users/{id}`)。`{name}` は `r.PathValue("name")` で取り出す。`POST/PUT/PATCH` は body decode、`GET/DELETE` は query string から組み立てる
 
 
 ### 既存エンティティにフィールドを追加したい
 
 User に `phone_number` を追加するケース。
 
-1. `proto/user/v1/user.proto` にフィールド追加（必要なら `// @required` 等のマーカー）
-2. `make proto-gen` で `user.gen.go` が再生成 → ファクトリ `NewUser` のシグネチャが変わる
-3. **コンパイルエラー** で影響範囲（Service / Handler）が特定される
+1. `proto/user/v1/user.proto` にフィールド追加(必要なら `// @required` 等のマーカー)
+2. `make proto-gen` で `user.gen.go` が再生成 → ファクトリ `NewUser` のシグネチャと DTO が変わる
+3. **コンパイルエラー** で影響範囲(Service / Handler / Usecase 実装)が特定される
 4. エラーが出た箇所を最小差分で更新
+5. `make migration-gen` で `migrations/<timestamp>_alter_users.up.sql` が出る — `ADD COLUMN` の場合 NOT NULL なら **WARNING コメント** が付くので、既存行があるなら 2 段階(NULL 許容で追加 → 値埋め → NOT NULL 化)に手動分割する判断をここで行う
+6. SQL を確認したら `migrations/.snapshot.json` ごと commit
+7. 本番適用は `migrate -path migrations -database "$DATABASE_URL" up`
 
 ### 新しい REST エンドポイントを追加したい
 
@@ -219,46 +254,55 @@ ls .claude/skills/
 ls .claude/agents/
 ```
 
-## レイヤー構成（青色が自動生成、白色が手書き）
+## レイヤー構成 (`*.gen.*` が自動生成、それ以外が手書き)
 
 ```
 proto/user/v1/user.proto  ← 唯一の手書き source
      │
-     └─ buf generate
+     ├─ buf generate (mss-protoc-gen)
+     │   │
+     │   ├→ internal/domain/entity/user.gen.go              (struct + GORM タグ + TableName)
+     │   ├→ internal/domain/entity/registry.gen.go          (entity.All 一覧)
+     │   ├→ internal/domain/repository/user_repository.gen.go
+     │   ├→ internal/domain/repository/mock/mock_user_repository.gen.go
+     │   ├→ internal/infra/repository/user_postgres_repository.gen.go
+     │   ├→ internal/dto/user.gen.go                         (UserDTO + From*)
+     │   ├→ internal/usecase/user_usecase_interface.gen.go
+     │   ├→ internal/handler/user_handler.gen.go             (REST Handler、net/http)
+     │   └→ internal/di/handlers.gen.go                      (Register(mux))
+     │
+     └─ make migration-gen (cmd/mss-migration-gen)
          │
-         ├→ pkg/domain/entity/user.gen.go       [mss-protoc-gen]
-         ├→ pkg/domain/repository/user_repository.gen.go
-         ├→ pkg/domain/repository/mock/mock_user_repository.gen.go
-         ├→ pkg/infra/repository/user_postgres_repository.gen.go
-         ├→ pkg/usecase/user_usecase_interface.gen.go
-         ├→ pkg/handler/user_handler.gen.go     (REST Handler、net/http)
-         └→ pkg/di/handlers.gen.go              (Register(mux))
+         └→ migrations/<timestamp>_<table>.up.sql            (差分ベース、CASCADE/DEFAULT は使わない)
+            migrations/.snapshot.json                        (前回適用 schema、git commit)
 
-REST Handler (生成) → Usecase interface (生成)
-                          ↑ 実装
-                      <Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成) → Entity (生成)
-                                                                          ↑
-                                                               Postgres Repository (生成)
+REST Handler (生成) ─json.Encode→ DTO (生成)
+        ↓ 呼び出し                  ↑ 変換 (usecase 内で dto.From*)
+Usecase interface (生成)           Entity (生成)
+        ↑ 実装                       ↑ GORM が直接読み書き
+<Name>UsecaseImpl (手書き) → Service (手書き) → Repository (生成)
+                                                     ↑ 実装
+                                          Postgres Repository (生成)
 ```
 
-HTTP リクエストは生成 Handler が JSON を parse → Usecase 実装に委譲 → Entity を取得 → JSON として返却、の順で通ります。
+HTTP リクエストは生成 Handler が JSON / query を parse → Usecase 実装に委譲 → Entity を Repository 経由で操作 → Usecase 内で DTO に変換 → Handler が `json.Encode(dto)` で返却、の順で通ります。
 
-## インフラ層の構成（Postgres 単一実装）
+## インフラ層の構成 (Postgres 単一実装)
 
-Repository の本番実装は proto から生成された **PostgreSQL + GORM 版**（`pkg/infra/repository/*_postgres_repository.gen.go`）に統一しています。InMemory 実装は採用しません。
+Repository の本番実装は proto から生成された **PostgreSQL + GORM 版**(`internal/infra/repository/*_postgres_repository.gen.go`)に統一しています。InMemory 実装は採用しません。
 
-- **ユニットテスト**: 生成された Mock（`pkg/domain/repository/mock/`）を Service / UseCase のテストに注入
-- **結合テスト**: docker-compose または testcontainers で起動した PostgreSQL に接続し `tx.Init(db)` を呼んでから `NewPostgresUserRepository()` で取得
-- **本番**: 同じ `NewPostgresUserRepository()`。DB 接続情報は `env.DB*()` から
+- **ユニットテスト**: 生成された Mock(`internal/domain/repository/mock/`)を Service / UseCase のテストに注入
+- **結合テスト**: docker-compose または testcontainers で起動した PostgreSQL に接続し `tx.Init(db)` を呼んでから `NewPostgresUserRepository()` で取得。テスト用 schema は `AutoMigrateUser(db)` で同期(本番は使わない)
+- **本番**: 同じ `NewPostgresUserRepository()`。DB 接続情報は `env.DB*()` から。スキーマは `migrations/*.up.sql` を `golang-migrate` で適用
 
-### 配線例（`cmd/api/main.go`）
+### 配線例 (`cmd/api/main.go`)
 
 ```go
 import (
     "gorm.io/driver/postgres"
     "gorm.io/gorm"
 
-    infrarepo "github.com/example/manji-standard-server-go/pkg/infra/repository"
+    infrarepo "github.com/example/manji-standard-server-go/internal/infra/repository"
     "github.com/example/manji-standard-server-go/pkg/util/env"
     "github.com/example/manji-standard-server-go/pkg/util/logger"
     "github.com/example/manji-standard-server-go/pkg/util/tx"
@@ -270,13 +314,26 @@ dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disabl
 db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
 if err != nil { log.Fatal(err) }
 tx.Init(db)
-if err := infrarepo.AutoMigrateUser(db); err != nil { log.Fatal(err) }
+// 本番では AutoMigrateUser を呼ばない。代わりに migrations/*.up.sql を golang-migrate で適用しておく。
 userRepo := infrarepo.NewPostgresUserRepository()
 ```
 
-### 別 DB（MySQL / Redis / MongoDB）へ移管する場合
+## Migration 運用 (`migrations/`)
 
-CLAUDE.md の「データストア」欄と `cmd/mss-protoc-gen/generator/infra_postgres_repository/` のテンプレートを書き換えて `make proto-gen` で再生成する。ランタイムの DI 切り替えではなく、**テンプレート差し替え + 再生成** が切り替え手段。
+Entity の `gorm:` タグから `make migration-gen` で **差分 SQL** を生成する独自ツール (`cmd/mss-migration-gen`)。`mss-protoc-gen` と対をなすバイナリ。
+
+- **ファイル形式**: `migrations/<YYYYMMDDHHMMSS>_<table>.up.sql` (1 entity 1 file、golang-migrate 互換)
+- **状態保持**: `migrations/.snapshot.json` (前回適用した schema を JSON に。**git commit する**)
+- **down は手書き**: 必要なら `<同 timestamp>_<table>.down.sql` を併置
+- **CASCADE / DEFAULT は使わない**: NOT NULL カラムを後から追加する場合は 2 段階(NULL 許容で追加 → 値埋め → NOT NULL 化)が必要、生成 SQL に WARNING コメントが入る
+- **適用**: `golang-migrate` 想定。`migrate -path migrations -database "$DATABASE_URL" up`
+- **`AutoMigrate*` は開発・テスト用**: 本番起動時には呼ばない
+
+詳細は `CLAUDE.md` の「Migration 生成」節を参照。
+
+### 別 DB (MySQL / Redis / MongoDB) へ移管する場合
+
+CLAUDE.md の「データストア」欄と `cmd/mss-protoc-gen/generator/infra_postgres_repository/` のテンプレートを書き換えて `make proto-gen` で再生成する。ランタイムの DI 切り替えではなく、**テンプレート差し替え + 再生成** が切り替え手段。`mss-migration-gen` も Postgres 前提で書かれているので、別 DB の場合は SQL 出力部 (`cmd/mss-migration-gen/sql.go`) を該当 dialect に書き換える。
 
 詳細は:
 - [`../manji-standard-server/README.md#対象-db--自動生成対象の変更方法`](../manji-standard-server/README.md#対象-db--自動生成対象の変更方法)

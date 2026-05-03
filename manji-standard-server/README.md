@@ -20,11 +20,14 @@ Claude Code で動くバックエンド開発の標準基盤。DDD + クリー�
 | proto 駆動 DDD | ✅ | ✅ | ✅ |
 | mss-protoc-gen | ✅ | ✅ | ✅ |
 | Entity / Repo interface / Mock / Postgres 実装を生成 | ✅ | ✅ | ✅ |
+| DTO + entity → DTO 変換関数を生成 | ✅ | ✅ | ✅ |
+| Entity が ORM スキーマ(GORM タグ / Drizzle pgTable)を所有 | ✅ | ✅ | ✅ |
 | Usecase interface + Input 型を生成 | ✅ | ✅ | ✅ |
 | API スタイル | **REST** | **REST** | **REST** |
 | URL ルーティング指定 | `@http METHOD /path` | 同左 | 同左 |
 | REST Handler 実装を生成 | ✅ (`net/http`) | ✅ (Hono `Context`) | ✅ (Next Route Handler) |
 | DI 配線を生成 | ✅ (`Handlers` struct + `Register(mux)`) | ✅ (`registerHandlers(app, deps)`) | ✅ (`handler-registry` 遅延 factory) |
+| Entity → DB マイグレーション SQL を生成 | ✅ (`mss-migration-gen` + `golang-migrate`) | ⚠️ (drizzle-kit を採用) | ⚠️ (drizzle-kit を採用) |
 | 外部 DI フレームワーク | 不使用 | 不使用 | 不使用 |
 
 **手書きに残るのは 3 実装とも Service + Usecase 実装 + DI ワイヤリング数行のみ**。ドメイン層・ユースケース層 interface・REST Handler・ルーティング登録は全て proto から生成される。
@@ -66,7 +69,7 @@ make -f /path/to/manji-standard-server/Makefile install
 
 ### アーキテクチャパターンだけ参考にしたい
 
-`docs/patterns/` の 3 本（proto-driven-ddd / mss-protoc-gen / infra-swap）を読む。
+`docs/patterns/` の 4 本(proto-driven-ddd / mss-protoc-gen / mss-migration-gen / infra-swap)を読む。
 skill / 実装を取り込まなくても、概念だけ取り入れられる。
 
 ### 開発中のユースケース別ガイド
@@ -91,7 +94,8 @@ manji-standard-server 系が推奨するバックエンドアーキテクチャ�
 | パターン | 要点 |
 | --- | --- |
 | [Proto 駆動 DDD](./docs/patterns/proto-driven-ddd.md) | `.proto` を唯一のソースとし、Entity / Repository interface / Postgres 実装 / Mock を自動生成する |
-| [mss-protoc-gen](./docs/patterns/mss-protoc-gen.md) | DDD 層を生成するカスタム protoc プラグインの設計ガイド（言語別に実装） |
+| [mss-protoc-gen](./docs/patterns/mss-protoc-gen.md) | DDD 層を生成するカスタム protoc プラグインの設計ガイド(言語別に実装) |
+| [mss-migration-gen](./docs/patterns/mss-migration-gen.md) | 生成された Entity の ORM タグから差分マイグレーション SQL を生成するカスタムジェネレータの設計ガイド |
 | [インフラ切り替え](./docs/patterns/infra-swap.md) | 生成対象 DB を Postgres → MySQL / Redis / MongoDB に移管する手順 |
 
 これらの参照実装は `manji-standard-server-go` / `manji-standard-server-ts-hono` / `manji-standard-server-ts-next` に存在。Next 系実装は **RPC プロトコルを持たない** が proto 駆動 DDD（ドメイン層生成）は採用しており、[切り替えパターン](./docs/patterns/infra-swap.md)・[共通原則](./docs/patterns/README.md)も同じく遵守。

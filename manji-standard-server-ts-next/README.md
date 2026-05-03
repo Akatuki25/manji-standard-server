@@ -9,8 +9,20 @@ Next.js（App Router） + TypeScript + DDD のフロントエンド + API プロ
 
 ```bash
 npm install
-npm run dev        # :3000
+npm run proto:gen                      # proto からコード生成
+npx drizzle-kit generate               # entity の pgTable から差分マイグレーション SQL を生成
+npx drizzle-kit migrate                # マイグレーション適用
+npm run dev                            # :3000
 ```
+
+## DB マイグレーション
+
+[`mss-migration-gen` パターン](../manji-standard-server/docs/patterns/mss-migration-gen.md) に対応。Drizzle ORM 採用なので **`drizzle-kit` で代替**(独自 mss-migration-gen は Go 版のみ提供)。
+
+- `src/domain/entity/*.gen.ts` の `pgTable` 定義が schema の真実
+- `npx drizzle-kit generate` で `migrations/` に差分 SQL + `drizzle/meta/` に snapshot
+- snapshot は git commit する
+- 適用は `npx drizzle-kit migrate` または `golang-migrate`
 
 ## エンドポイント
 

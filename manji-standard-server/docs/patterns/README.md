@@ -10,6 +10,7 @@ Go / TypeScript / Hono / Next / その他言語でも共通に適用できる原
 | --- | --- | --- |
 | Proto 駆動 DDD | [proto-driven-ddd.md](./proto-driven-ddd.md) | スキーマが安定し Entity が多数あるサービス |
 | カスタム protoc プラグイン設計 | [mss-protoc-gen.md](./mss-protoc-gen.md) | proto 駆動 DDD を実現するプラグイン実装時 |
+| Entity → DB マイグレーション生成 | [mss-migration-gen.md](./mss-migration-gen.md) | 生成された Entity の ORM タグから差分マイグレーション SQL を自動生成したい時 |
 | インフラ層の切り替え | [infra-swap.md](./infra-swap.md) | 生成対象 DB を Postgres → MySQL / Redis / MongoDB に移管する場合 |
 
 ## 共通原則

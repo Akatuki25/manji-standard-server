@@ -156,7 +156,7 @@ Phase 2 ─┘
 
 ## 8. ロールバック戦略
 
-<本番デプロイ後に戻せる設計になっているか。feature flag、DB migration の可逆性>
+<本番デプロイ後に戻せる設計になっているか。feature flag、DB migration を破壊的にしない分割(NOT NULL 化を 2 段階に分けるなど)、down が必要なら手書きで添付>
 
 ## 9. オープン課題
 

@@ -150,13 +150,28 @@ Route Handler は **すべて生成物**(`route.ts` 冒頭に `// Code generated
 
 ## よく使うコマンド
 
-- **Proto 生成**: `make proto-gen` / `npm run proto:gen`（proto 変更後は必須）
+- **Proto 生成**: `make proto-gen` / `npm run proto:gen`(proto 変更後は必須)
 - **生成物削除**: `make proto-clean` / `npm run proto:clean`
-- **開発**: `npm run dev`（:3000）
+- **DB マイグレーション生成**: `npx drizzle-kit generate`(entity の `pgTable` 変更後)
+- **DB マイグレーション適用**: `npx drizzle-kit migrate`(または `golang-migrate` で `migrations/*.sql` を流す)
+- **開発**: `npm run dev`(:3000)
 - **ビルド**: `npm run build`
 - **起動**: `npm start`
 - **型チェック**: `npm run lint`
 - **Docker 起動**: `make docker-up`
+
+## DB マイグレーション運用
+
+manji-standard-server の標準パターン [`mss-migration-gen`](../manji-standard-server/docs/patterns/mss-migration-gen.md) に対応する。本プロジェクトでは Drizzle ORM を採用しているため、**`drizzle-kit` を migration ツールにする** のが第一選択(`mss-migration-gen` の独自実装は Go 版のみ提供)。
+
+- entity ファイル内の `pgTable` 定義(`<Name>Table`)が schema の真実
+- `drizzle.config.ts` で `schema: "./src/domain/entity/*.gen.ts"` を指す
+- `npx drizzle-kit generate` で差分 SQL を `migrations/` に出力 + `drizzle/meta/` にスナップショット保存
+- snapshot は **git commit する**(`mss-migration-gen` の `.snapshot.json` と同じ役割)
+- 適用は `npx drizzle-kit migrate` または golang-migrate
+- **CASCADE / DEFAULT は使わない方針**を貫きたい場合、生成 SQL を確認してから commit する
+
+`mss-migration-gen` を独自に TypeScript で実装したい場合のヒントは pattern doc 末尾を参照。
 
 ## 規約上の禁則
 

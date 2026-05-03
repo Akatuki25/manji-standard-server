@@ -50,7 +50,7 @@ memory: project
 
 - 各段階で元に戻せる構造を維持
 - feature flag で新旧を切り替え可能にする
-- DB migration は可逆（down migration がある）
+- DB migration は前進方向に分割し、各段階を独立して適用できるようにする(2 段階の NOT NULL 化 / カラム追加 → backfill → NOT NULL 化、など)。down は手書き運用なので、必要なときだけ書く
 
 ## 動作フロー
 
@@ -138,7 +138,7 @@ Step N: 旧実装の削除
 - ❌ **旧実装を先に消す**（必ず新実装稼働後）
 - ❌ **定量化できない改善**（「綺麗にした」だけの変更は別タスク）
 - ❌ **他チームに無断でインターフェース変更**
-- ❌ **down migration なしの DB 変更**
+- ❌ **段階分割なしの破壊的 DB 変更**(NOT NULL 化 / カラム削除 / 型変更を 1 migration で済ませる。`migrations/*.up.sql` の WARNING コメントを無視しない)
 
 ## backend-conservative / backend-greenfield との違い
 

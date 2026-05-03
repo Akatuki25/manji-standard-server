@@ -5,10 +5,10 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"github.com/example/manji-standard-server-go/internal/domain/repository"
-	"github.com/example/manji-standard-server-go/internal/usecase"
 	"net/http"
 	"strconv"
+	"github.com/example/manji-standard-server-go/internal/domain/repository"
+	"github.com/example/manji-standard-server-go/internal/usecase"
 )
 
 type UserHandler struct {

@@ -2,18 +2,29 @@
 
 TypeScript + Hono + DDD + REST のバックエンドプロジェクト。
 
-> [manji-standard-server 系](../manji-standard-server/README.md) の **Hono 参照実装**。基盤の skill / subagent / [アーキテクチャパターン](../manji-standard-server/docs/patterns/README.md)（proto 駆動 DDD / `mss-protoc-gen` / インフラ差し替え）に準拠。
+> [manji-standard-server 系](../manji-standard-server/README.md) の **Hono 参照実装**。基盤の skill / subagent / [アーキテクチャパターン](../manji-standard-server/docs/patterns/README.md)(proto 駆動 DDD / `mss-protoc-gen` / `mss-migration-gen`(TS では drizzle-kit で代替) / インフラ差し替え)に準拠。
 > 姉妹実装: [Go 版](../manji-standard-server-go/) / [Next.js 版](../manji-standard-server-ts-next/)
 
 ## セットアップ
 
 ```bash
 npm install
-make proto-gen         # proto からコード生成
-npm run dev            # tsx watch で起動（:8080）
+make proto-gen                         # proto からコード生成
+npx drizzle-kit generate               # entity の pgTable から差分マイグレーション SQL を生成
+npx drizzle-kit migrate                # マイグレーション適用
+npm run dev                            # tsx watch で起動 (:8080)
 # or
 npm run build && npm start
 ```
+
+## DB マイグレーション
+
+[`mss-migration-gen` パターン](../manji-standard-server/docs/patterns/mss-migration-gen.md) に対応。Drizzle ORM 採用なので **`drizzle-kit` で代替**(独自 mss-migration-gen は Go 版のみ提供)。
+
+- `src/domain/entity/*.gen.ts` の `pgTable` 定義が schema の真実
+- `npx drizzle-kit generate` で `migrations/` に差分 SQL + `drizzle/meta/` に snapshot
+- snapshot は git commit する
+- 適用は `npx drizzle-kit migrate` または `golang-migrate`
 
 ## エンドポイント (REST)
 

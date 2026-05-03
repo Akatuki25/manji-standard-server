@@ -1,0 +1,34 @@
+{
+  "tables": {
+    "users": {
+      "name": "users",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "sql_type": "timestamptz",
+          "not_null": true,
+          "primary_key": false
+        },
+        "email": {
+          "name": "email",
+          "sql_type": "text",
+          "not_null": true,
+          "primary_key": false,
+          "unique": true
+        },
+        "id": {
+          "name": "id",
+          "sql_type": "text",
+          "not_null": false,
+          "primary_key": true
+        },
+        "name": {
+          "name": "name",
+          "sql_type": "text",
+          "not_null": true,
+          "primary_key": false
+        }
+      }
+    }
+  }
+}
