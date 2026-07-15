@@ -42,7 +42,11 @@ def new_{{ snake }}_router(uc: {{ service.name }}Usecase) -> APIRouter:
 {% endfor %}
     ):
         try:
+{% if r.ret_kind == 'dto' or r.ret_kind == 'list' %}
             result = uc.{{ r.name | snake }}(
+{% else %}
+            uc.{{ r.name | snake }}(
+{% endif %}
                 {{ r.name }}Input(
 {% for f in r.path_fields %}
                     {{ f.name }}={{ f.name }},
