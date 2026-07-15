@@ -279,7 +279,10 @@ function write(rel, content) {
   console.log("gen:", rel);
 }
 
-const proto = readFileSync(join(ROOT, "proto/user/v1/user.proto"), "utf8");
+// proto はスタック直下 proto/ からの相対パスを argv で渡せる(省略時 user/v1/user.proto)。
+// 新ドメインの scaffold 利用時は例: `npm run gen -- atlas/v1/atlas.proto`(REUSE.md)。
+const protoRel = process.argv[2] ?? "proto/user/v1/user.proto";
+const proto = readFileSync(join(ROOT, protoRel.startsWith("proto/") ? protoRel : "proto/" + protoRel), "utf8");
 const model = parseProto(proto);
 const msgByName = Object.fromEntries(model.messages.map((m) => [m.name, m]));
 for (const svc of model.services) {
