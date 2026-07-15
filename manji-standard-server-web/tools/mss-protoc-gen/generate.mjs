@@ -190,7 +190,7 @@ function tplDetail(ent) {
     '      <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "center" }}>',
     '        <Link href={`/' + s + 's/${id}/edit`}>Edit</Link>',
     "        <" + E + "DeleteButton id={id} />",
-    "      </div>", "    </div>", "  );", "}\n");
+    "      </div>", "    </div>", "  );", "}\n"];
   return L.join("\n");
 }
 
