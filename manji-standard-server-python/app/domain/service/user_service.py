@@ -31,6 +31,20 @@ class UserService:
         self._repo.insert(user)
         return user
 
+    def bulk_create(self, items) -> list[User]:
+        # 事前 dedup はせず DB 制約に委ねる(manji と同じ)。items は .email/.name を持つ
+        users = [User.new(uuid.uuid4().hex, i.email, i.name, self._clock()) for i in items]
+        self._repo.bulk_insert(users)
+        return users
+
+    def bulk_upsert(self, items) -> list[User]:
+        users = [
+            User.new(i.id, i.email, i.name, _unix_or_now(i.created_at_unix, self._clock))
+            for i in items
+        ]
+        self._repo.bulk_upsert(users)
+        return users
+
     def get(self, id: str) -> User | None:
         return self._repo.select_by_pk(id)
 

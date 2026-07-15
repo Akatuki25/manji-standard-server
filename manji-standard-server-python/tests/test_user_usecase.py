@@ -13,6 +13,8 @@ from app.domain.service.user_service import UserService
 from app.usecase.user_usecase import UserUsecase
 from app.usecase.user_usecase_interface import (
     CreateUserInput,
+    BulkCreateUsersInput,
+    CreateUserParams,
     GetUserInput,
     ListUsersInput,
     UpdateUserInput,
@@ -85,6 +87,22 @@ def test_update_user_missing_raises_notfound():
     repo.select_by_pk_func = lambda id: None
     with pytest.raises(UserNotFoundError):
         _uc(repo).update_user(UpdateUserInput(id="x", email="a@b.com", name="N"))
+
+
+def test_bulk_create_users_returns_dtos():
+    repo = MockUserRepository()
+    inserted: list[User] = []
+    repo.bulk_insert_func = lambda es: inserted.extend(es)
+    out = _uc(repo).bulk_create_users(
+        BulkCreateUsersInput(
+            users=[
+                CreateUserParams(email="a@b.com", name="A"),
+                CreateUserParams(email="c@d.com", name="B"),
+            ]
+        )
+    )
+    assert [d.email for d in out] == ["a@b.com", "c@d.com"]
+    assert len(inserted) == 2 and all(u.id for u in inserted)
 
 
 def test_delete_user_delegates_to_repo():

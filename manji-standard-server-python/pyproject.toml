@@ -23,3 +23,8 @@ dev = [
 
 [tool.ruff]
 target-version = "py312"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: 実 Postgres が必要な結合テスト(docker compose up -d して -m integration)",
+]

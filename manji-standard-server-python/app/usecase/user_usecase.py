@@ -12,7 +12,9 @@ from app.usecase.user_usecase_interface import (
     GetUserByEmailInput,
     GetUserInput,
     CreateUserInput,
+    BulkCreateUsersInput,
     UpsertUserInput,
+    BulkUpsertUsersInput,
     UpdateUserInput,
     BulkDeleteUsersInput,
     DeleteUserInput,
@@ -40,6 +42,12 @@ class UserUsecase:  # implements UserServiceUsecase (Protocol)
 
     def create_user(self, inp: CreateUserInput) -> UserDTO | None:
         return UserDTO.from_entity(self._svc.create(inp.email, inp.name))
+
+    def bulk_create_users(self, inp: BulkCreateUsersInput) -> list[UserDTO]:
+        return from_entities(self._svc.bulk_create(inp.users))
+
+    def bulk_upsert_users(self, inp: BulkUpsertUsersInput) -> list[UserDTO]:
+        return from_entities(self._svc.bulk_upsert(inp.users))
 
     def upsert_user(self, inp: UpsertUserInput) -> UserDTO | None:
         return UserDTO.from_entity(

@@ -59,15 +59,28 @@ def main() -> None:
             base = f.dto_type
         return f"list[{base}]" if f.repeated else base
 
+    def _intype(f) -> str:
+        """usecase Input / handler Body のフィールド型。message は param 名、scalar は python 型。"""
+        base = f.type if f.type[:1].isupper() else f.dto_type
+        return f"list[{base}]" if f.repeated else base
+
     env.filters["dtotype"] = _dtotype
+    env.filters["intype"] = _intype
 
     pm = parse("user/v1/user.proto", os.path.join(ROOT, "proto"))
 
     for svc in pm.services:
         entity = _entity_of_service(pm, svc)
         s = _snake(entity.name)
+        # param メッセージ(非entityで request の field 型に現れる CamelCase)を収集
+        param_names: list[str] = []
+        for r in svc.rpcs:
+            for f in r.input_fields:
+                if f.type[:1].isupper() and f.type != entity.name and f.type not in param_names:
+                    param_names.append(f.type)
+        params = [pm.message(n) for n in param_names]
         ctx = dict(pm=pm, service=svc, entity=entity, snake=s, rpcs=svc.rpcs,
-                   msg=pm.message)
+                   params=params, msg=pm.message)
         for tpl_name, out_fn in GEN:
             rel = out_fn(s)
             dst = os.path.join(ROOT, rel)

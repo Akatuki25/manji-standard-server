@@ -2,7 +2,20 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
+from pydantic import BaseModel
 from app.dto.user import UserDTO
+
+class CreateUserParams(BaseModel):
+    email: str
+    name: str
+
+
+class UpsertUserParams(BaseModel):
+    id: str
+    email: str
+    name: str
+    created_at_unix: int
+
 
 @dataclass
 class ListUsersInput:
@@ -29,6 +42,16 @@ class GetUserInput:
 class CreateUserInput:
     email: str
     name: str
+
+
+@dataclass
+class BulkCreateUsersInput:
+    users: list[CreateUserParams]
+
+
+@dataclass
+class BulkUpsertUsersInput:
+    users: list[UpsertUserParams]
 
 
 @dataclass
@@ -67,6 +90,8 @@ class UserServiceUsecase(Protocol):
     def get_user_by_email(self, inp: GetUserByEmailInput) -> UserDTO | None: ...
     def get_user(self, inp: GetUserInput) -> UserDTO | None: ...
     def create_user(self, inp: CreateUserInput) -> UserDTO | None: ...
+    def bulk_create_users(self, inp: BulkCreateUsersInput) -> list[UserDTO]: ...
+    def bulk_upsert_users(self, inp: BulkUpsertUsersInput) -> list[UserDTO]: ...
     def upsert_user(self, inp: UpsertUserInput) -> UserDTO | None: ...
     def update_user(self, inp: UpdateUserInput) -> UserDTO | None: ...
     def bulk_delete_users(self, inp: BulkDeleteUsersInput) -> None: ...

@@ -3,8 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.usecase.{{ snake }}_usecase_interface import (
-{% for r in rpcs if not r.has_msg_input %}
+{% for r in rpcs %}
     {{ r.name }}Input,
+{% endfor %}
+{% for p in params %}
+    {{ p.name }},
 {% endfor %}
     {{ service.name }}Usecase,
 )
@@ -14,17 +17,17 @@ from app.domain.repository.{{ snake }}_repository import (
 )
 
 {% set E = entity.name %}
-{% for r in rpcs if not r.has_msg_input and r.body_fields %}
+{% for r in rpcs if r.body_fields %}
 class {{ r.name }}Body(BaseModel):
 {% for f in r.body_fields %}
-    {{ f.name }}: {{ 'list[' + f.dto_type + ']' if f.repeated else f.dto_type }}
+    {{ f.name }}: {{ f | intype }}
 {% endfor %}
 
 
 {% endfor %}
 def new_{{ snake }}_router(uc: {{ service.name }}Usecase) -> APIRouter:
     router = APIRouter()
-{% for r in rpcs if not r.has_msg_input %}
+{% for r in rpcs %}
 
     @router.{{ r.http_method | lower }}("{{ r.http_path }}"{% if r.http_method == 'POST' %}, status_code=201{% elif r.ret_kind == 'empty' %}, status_code=204{% endif %})
     def {{ r.name | snake }}(

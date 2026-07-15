@@ -8,11 +8,15 @@ from app.usecase.user_usecase_interface import (
     GetUserByEmailInput,
     GetUserInput,
     CreateUserInput,
+    BulkCreateUsersInput,
+    BulkUpsertUsersInput,
     UpsertUserInput,
     UpdateUserInput,
     BulkDeleteUsersInput,
     DeleteUserInput,
     DeleteAllUsersInput,
+    CreateUserParams,
+    UpsertUserParams,
     UserServiceUsecase,
 )
 from app.domain.repository.user_repository import (
@@ -23,6 +27,14 @@ from app.domain.repository.user_repository import (
 class CreateUserBody(BaseModel):
     email: str
     name: str
+
+
+class BulkCreateUsersBody(BaseModel):
+    users: list[CreateUserParams]
+
+
+class BulkUpsertUsersBody(BaseModel):
+    users: list[UpsertUserParams]
 
 
 class UpsertUserBody(BaseModel):
@@ -139,6 +151,42 @@ def new_user_router(uc: UserServiceUsecase) -> APIRouter:
         if result is None:
             raise HTTPException(status_code=404, detail="not found")
         return result.to_dict()
+
+    @router.post("/api/users/bulk", status_code=201)
+    def bulk_create_users(
+        body: BulkCreateUsersBody,
+    ):
+        try:
+            result = uc.bulk_create_users(
+                BulkCreateUsersInput(
+                    users=body.users,
+                )
+            )
+        except UserNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        except UserAlreadyExistsError:
+            raise HTTPException(status_code=409, detail="already exists")
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return [d.to_dict() for d in result]
+
+    @router.put("/api/users/bulk")
+    def bulk_upsert_users(
+        body: BulkUpsertUsersBody,
+    ):
+        try:
+            result = uc.bulk_upsert_users(
+                BulkUpsertUsersInput(
+                    users=body.users,
+                )
+            )
+        except UserNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        except UserAlreadyExistsError:
+            raise HTTPException(status_code=409, detail="already exists")
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=str(ex))
+        return [d.to_dict() for d in result]
 
     @router.put("/api/users/{id}")
     def upsert_user(
