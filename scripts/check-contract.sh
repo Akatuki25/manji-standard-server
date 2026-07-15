@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 norm() { grep -v '^option ' "$1" | cat -s; }   # option 行を除去 + 連続空行を1行に
 
-stacks=(manji-standard-server-go manji-standard-server-ts-hono manji-standard-server-ts-next manji-standard-server-python)
+stacks=(manji-standard-server-go manji-standard-server-ts-hono manji-standard-server-ts-next manji-standard-server-python manji-standard-server-web)
 rc=0
 for rel in $(cd proto && find . -name '*.proto'); do
   canon="proto/$rel"
