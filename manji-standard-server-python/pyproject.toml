@@ -1,0 +1,30 @@
+[project]
+name = "manji-standard-server-python"
+version = "0.0.1"
+description = "manji-standard-server の Python(FastAPI) スタック — proto-first codegen + DDD"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.9",
+    "protobuf>=5.28",
+    "alembic>=1.13",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "testcontainers[postgres]>=4.8",
+    "jinja2>=3.1",   # mss-protoc-gen (Python port) のテンプレ
+    "ruff>=0.7",
+]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: 実 Postgres が必要な結合テスト(docker compose up -d して -m integration)",
+]
