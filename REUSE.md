@@ -93,7 +93,13 @@ cd <app>/web && docker compose up --build       # web(:3000)。NEXT_PUBLIC_API_B
 
 アプリ側では root に統合 compose を置き、backend/web/db をまとめて上げる構成を推奨。
 
-### 7. CI を移植する
+### 7. デザイン
+
+- web スタックは **design tokens(`src/lib/tokens.css`)+ widgets(`src/lib/widgets.tsx`)** を同梱しており、
+  生成UIは widget に委譲する構造。**見た目の変更は widget/tokens 側で行い、生成物を手で触らない**。
+- 画面を作る/直すときの規約は `.claude/skills/frontend-design/`(アプリへコピーして使う)。
+
+### 8. CI を移植する
 
 - codegen-drift(生成器を再実行 → 差分ゼロを強制)
 - contract-check(root proto と各スタック proto の一致)
