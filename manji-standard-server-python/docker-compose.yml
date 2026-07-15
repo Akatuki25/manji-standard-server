@@ -1,6 +1,19 @@
-# 結合テスト/ローカル用 Postgres。DATABASE_URL の既定(app/infra/db.py)と一致。
+# api + db(他スタックの compose 規約に合わせる)。db は結合テスト単体利用も可。
 services:
-  postgres:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://mss:mss@db:5432/mss"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "uv run --no-sync python tools/apply-migrations.py &&
+             uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  db:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: mss
@@ -13,3 +26,8 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:
