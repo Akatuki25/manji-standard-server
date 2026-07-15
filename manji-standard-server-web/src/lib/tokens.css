@@ -81,3 +81,7 @@ input, textarea, select, button {
   font: inherit;
   color: inherit;
 }
+
+a {
+  color: var(--accent);
+}
