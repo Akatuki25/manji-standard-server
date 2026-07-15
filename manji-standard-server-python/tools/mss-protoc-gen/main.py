@@ -4,7 +4,8 @@ proto を parse し、Jinja2 テンプレで各 DDD レイヤの *.gen.py を出
 Go 版 cmd/mss-protoc-gen と同じ責務: 生成対象は entity/dto/repository/mock/
 infra_repository/usecase_interface/handler/di/entity_registry。
 usecase の *実装* と main は手書き(生成しない)。
-使い方: python tools/mss-protoc-gen/main.py
+使い方: python tools/mss-protoc-gen/main.py [proto相対パス]
+  (省略時 user/v1/user.proto。新ドメインでは例: python tools/mss-protoc-gen/main.py atlas/v1/atlas.proto)
 """
 from __future__ import annotations
 import os, sys
@@ -67,7 +68,9 @@ def main() -> None:
     env.filters["dtotype"] = _dtotype
     env.filters["intype"] = _intype
 
-    pm = parse("user/v1/user.proto", os.path.join(ROOT, "proto"))
+    # proto はスタック直下 proto/ からの相対パス。新ドメインの scaffold 利用時は引数で渡す(REUSE.md)。
+    rel = sys.argv[1] if len(sys.argv) > 1 else "user/v1/user.proto"
+    pm = parse(rel, os.path.join(ROOT, "proto"))
 
     for svc in pm.services:
         entity = _entity_of_service(pm, svc)
@@ -92,6 +95,7 @@ def main() -> None:
 
     # di registry (全 service 横断)
     di = env.get_template("di.py.jinja").render(pm=pm, services=pm.services, snake=_snake)
+    os.makedirs(os.path.join(ROOT, "app/di"), exist_ok=True)
     with open(os.path.join(ROOT, "app/di/handlers.py"), "w") as f:
         f.write(di)
     print("gen: app/di/handlers.py")
@@ -99,6 +103,7 @@ def main() -> None:
     # entity registry
     reg = env.get_template("entity_registry.py.jinja").render(
         entities=[m for m in pm.messages if m.is_entity], snake=_snake)
+    os.makedirs(os.path.join(ROOT, "app/domain/entity"), exist_ok=True)
     with open(os.path.join(ROOT, "app/domain/entity/registry.py"), "w") as f:
         f.write(reg)
     print("gen: app/domain/entity/registry.py")
