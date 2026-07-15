@@ -4,7 +4,8 @@
 単一の真実とし、そこから **型付き API クライアント + CRUD UI(list / detail / form) + client validation** を生成する。
 backend↔frontend は同じ `@http`/`@annotation` から生成されるため**構造的に整合**する(ドリフトしない)。
 
-> ステータス: **設計のみ**(2026-07-15)。実装は次の build-out(Python スタックと同じ流儀で mss-protoc-gen を frontend 用に移植)。
+> ステータス: **生成器実装済み・1本通った**(2026-07-15)。self-contained な Node 生成器(buf/protoc不要=proto直パース)で
+> types/client/UserList/UserForm/page を生成、`tsc --noEmit` PASS。List=優先度カードリスト、Form validation=注釈由来。
 > 裏付け: 社内KB [[contract-to-ui-codegen]] / サーベイ [[ref-schema-driven-ui]]、UI原則 [[selection-design-pattern]]。
 
 ## 1. スタック
