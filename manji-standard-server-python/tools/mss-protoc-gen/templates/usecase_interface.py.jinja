@@ -2,7 +2,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
+{% if params %}
 from pydantic import BaseModel
+{% endif %}
 from app.dto.{{ snake }} import {{ entity.name }}DTO
 
 {% set E = entity.name %}

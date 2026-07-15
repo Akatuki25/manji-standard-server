@@ -240,7 +240,7 @@ def new_user_router(uc: UserServiceUsecase) -> APIRouter:
         body: BulkDeleteUsersBody,
     ):
         try:
-            result = uc.bulk_delete_users(
+            uc.bulk_delete_users(
                 BulkDeleteUsersInput(
                     ids=body.ids,
                 )
@@ -258,7 +258,7 @@ def new_user_router(uc: UserServiceUsecase) -> APIRouter:
         id: str,
     ):
         try:
-            result = uc.delete_user(
+            uc.delete_user(
                 DeleteUserInput(
                     id=id,
                 )
@@ -275,7 +275,7 @@ def new_user_router(uc: UserServiceUsecase) -> APIRouter:
     def delete_all_users(
     ):
         try:
-            result = uc.delete_all_users(
+            uc.delete_all_users(
                 DeleteAllUsersInput(
                 )
             )
