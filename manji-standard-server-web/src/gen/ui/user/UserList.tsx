@@ -2,6 +2,7 @@
 
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { listUsers } from "../../client/user";
 import type { User } from "../../types/user";
 
@@ -10,15 +11,18 @@ export function UserList() {
   const [rows, setRows] = useState<User[]>([]);
   useEffect(() => { listUsers().then(setRows).catch(() => setRows([])); }, []);
   return (
-    <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8 }}>
-      {rows.map((r) => (
-        <li key={r.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>{r.email}</div>
-          <div style={{ color: "#666", fontSize: 13 }}>
-            {r.id} <span> · </span> {new Date(r.created_at_unix * 1000).toLocaleDateString()}
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div>
+      <Link href="/users/new">+ New</Link>
+      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8, marginTop: 12 }}>
+        {rows.map((r) => (
+          <li key={r.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+            <Link href={`/users/${r.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{r.email}</div>
+              <div style={{ color: "#666", fontSize: 13 }}>{r.id} <span> · </span> {new Date(r.created_at_unix * 1000).toLocaleDateString()}</div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
