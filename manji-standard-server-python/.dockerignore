@@ -1,0 +1,7 @@
+# ホストの実行環境をイメージに持ち込まない(COPY . . が .venv を上書きする事故防止)
+.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache
+*.log

@@ -93,6 +93,7 @@ function fieldMeta(f) {
   const widget = a.form || (isPk || isTs ? "readonly" : ("email" in a ? "email" : "text"));
   return { ...f, label: (a.label || humanize(f.name)).replace(/"/g, ""), ts: tsType(f),
     isPk, isTs, isRequired: "required" in a, isEmail: "email" in a, isUnique: "unique" in a,
+    isNumeric: ["int32", "int64", "double", "float"].includes(f.type),
     listRole, widget, editable: !(isPk || isTs) };
 }
 const displayCell = (m, ref) => m.isTs ? "{new Date(" + ref + "." + m.name + " * 1000).toLocaleDateString()}" : "{" + ref + "." + m.name + "}";
@@ -216,7 +217,8 @@ function tplForm(ent) {
     if (m.isEmail) L.push("    if (!" + m.name + '.includes("@")) { setError("' + m.label + ' is invalid"); return; }');
   }
   L.push("    setError(null);");
-  L.push("    const body = { " + editable.map((m) => m.name).join(", ") + " };");
+  // 数値フィールドはフォーム state(string)から number へ変換して送る(int32/int64/double)
+  L.push("    const body = { " + editable.map((m) => (m.isNumeric ? m.name + ": Number(" + m.name + ") || 0" : m.name)).join(", ") + " };");
   L.push("    if (id) await update" + E + "(id, body); else await create" + E + "(body);");
   L.push('    router.push("/' + s + 's");');
   L.push("    router.refresh();");

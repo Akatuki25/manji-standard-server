@@ -8,7 +8,8 @@ usecase の *実装* と main は手書き(生成しない)。
   (省略時 user/v1/user.proto。新ドメインでは例: python tools/mss-protoc-gen/main.py atlas/v1/atlas.proto)
 """
 from __future__ import annotations
-import os, sys
+import os
+import sys
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 HERE = os.path.dirname(os.path.abspath(__file__))
