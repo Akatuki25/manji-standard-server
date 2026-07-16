@@ -237,11 +237,15 @@ function tplForm(ent) {
   L.push('    router.push("/' + s + 's");');
   L.push("    router.refresh();");
   L.push("  }");
+  // 詳細/一覧画面と同じ質感に: カード内にフォームを置き、primary + cancel の2アクション。
   L.push("  return (");
-  L.push('    <form onSubmit={submit} style={{ display: "grid", gap: "var(--sp-3)", maxWidth: 400 }}>');
+  L.push('    <form onSubmit={submit} style={{ display: "grid", gap: "var(--sp-4)", maxWidth: 520, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)", padding: "var(--sp-5)" }}>');
   for (const m of editable) L.push('      <Field label="' + m.label + '" type="' + m.widget + '" value={' + m.name + "} onChange={set_" + m.name + "} />");
   L.push("      {error && <ErrorText>{error}</ErrorText>}");
-  L.push('      <div><Button type="submit" variant="primary">{id ? "Update" : "Create"}</Button></div>');
+  L.push('      <div style={{ display: "flex", gap: "var(--sp-2)" }}>');
+  L.push('        <Button type="submit" variant="primary">{id ? "Update" : "Create"}</Button>');
+  L.push('        <Button variant="ghost" onClick={() => router.push("/' + s + 's")}>Cancel</Button>');
+  L.push("      </div>");
   L.push("    </form>", "  );", "}\n");
   return L.join("\n");
 }
