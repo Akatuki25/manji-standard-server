@@ -89,13 +89,23 @@ const isMsg = (t) => /^[A-Z]/.test(t);
 function fieldMeta(f) {
   const a = f.annotations;
   const isPk = "pk" in a, isTs = "timestamp" in a;
-  const listRole = a.list || (isPk ? "secondary" : (f.type === "string" && !isTs ? "primary" : "secondary"));
+  // id/外部キー(`*_id`)は既定で secondary(タイトルにしない)。opaque な id が primary を奪う事故を防ぐ。
+  const isId = isPk || /_id$/.test(f.name);
+  const explicitRole = a.list; // @list primary|secondary|hidden(未指定は undefined)
+  const listRole = explicitRole || (isId ? "secondary" : (f.type === "string" && !isTs ? "primary" : "secondary"));
   const widget = a.form || (isPk || isTs ? "readonly" : ("email" in a ? "email" : "text"));
   return { ...f, label: (a.label || humanize(f.name)).replace(/"/g, ""), ts: tsType(f),
-    isPk, isTs, isRequired: "required" in a, isEmail: "email" in a, isUnique: "unique" in a,
+    isPk, isTs, isId, explicitRole, isRequired: "required" in a, isEmail: "email" in a, isUnique: "unique" in a,
     isNumeric: ["int32", "int64", "double", "float"].includes(f.type),
     listRole, widget, editable: !(isPk || isTs) };
 }
+
+// primary(タイトル)は1つだけ選ぶ: @list primary の明示が最優先 → 既定 primary の先頭 → 先頭field。
+// 明示アノテーションが field 順や型の既定に負けないようにする(summary が project_id に奪われる事故の修正)。
+const pickPrimary = (metas) =>
+  metas.find((m) => m.explicitRole === "primary")
+  || metas.find((m) => m.listRole === "primary")
+  || metas[0];
 const displayCell = (m, ref) => m.isTs ? "{new Date(" + ref + "." + m.name + " * 1000).toLocaleDateString()}" : "{" + ref + "." + m.name + "}";
 
 // ---------- templates ----------
@@ -141,7 +151,7 @@ function tplList(ent) {
   const E = ent.name, s = snake(E);
   const metas = ent.fields.map(fieldMeta);
   const pk = metas.find((m) => m.isPk) || metas[0];
-  const primary = metas.find((m) => m.listRole === "primary") || metas[0];
+  const primary = pickPrimary(metas);
   const secondary = metas.filter((m) => m.listRole === "secondary" && m !== primary);
   const secondaryJsx = secondary.length
     ? " secondary={<>" + secondary.map((m) => displayCell(m, "r")).join(" <span> · </span> ") + "</>}"
@@ -171,7 +181,7 @@ function tplDetail(ent) {
   const E = ent.name, s = snake(E);
   const metas = ent.fields.map(fieldMeta);
   const pk = metas.find((m) => m.isPk) || metas[0];
-  const primary = metas.find((m) => m.listRole === "primary") || metas[0];
+  const primary = pickPrimary(metas);
   const rest = metas.filter((m) => m !== primary);
   const kvItems = rest.map((m) => '{ k: "' + m.label + '", v: <>' + displayCell(m, "item") + "</> }").join(", ");
   const L = [HEADER, '"use client";', 'import { useEffect, useState } from "react";', 'import Link from "next/link";',
