@@ -1,23 +1,28 @@
-/* 手書き: design tokens — 全widgetと手書き画面はこの変数だけを参照する(生値のhex/pxを書かない)。
+/* design tokens — 全widgetと手書き画面はこの変数だけを参照する(生値のhex/pxを書かない)。
    ライト/ダークは prefers-color-scheme で自動追従。
-   パレットは indigo 寄りのブランド色: ニュートラルも accent 色相へわずかに寄せて統一感を出す。 */
+
+   ★ここは「構造(変数名・スケール)」+「中立プレースホルダの色値」。
+   色 = ブランドはプロジェクトごとに傾向が変わるので、**アプリ側の brand.css で色値だけ上書きする**
+   (layout で tokens.css の後に brand.css を import)。widget/画面のコードは色を変えても無変更。
+   → REUSE.md #7 / frontend-design skill / KB [[selection-design-pattern]]「色で統一感を出す」。 */
 :root {
   --font-sans: ui-sans-serif, system-ui, "Hiragino Sans", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* surface / text(indigo にわずかに寄せた neutral) */
-  --bg: #f7f8fc;
+  /* --- 色値(プレースホルダ: アプリの brand.css で上書き想定) --- */
+  /* surface / text — 中立グレー */
+  --bg: #fafafa;
   --surface: #ffffff;
-  --surface-2: #f0f1f8;
-  --border: #e3e5f0;
-  --border-strong: #ced1e2;
-  --text: #1c1d2b;
-  --text-muted: #565a72;
-  --text-faint: #9396b0;
+  --surface-2: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-muted: #52525b;
+  --text-faint: #a1a1aa;
 
-  /* accent / semantic(accent = indigo) */
-  --accent: #4f46e5;
-  --accent-soft: #e8e7fc;
+  /* accent / semantic — 中立 */
+  --accent: #2563eb;
+  --accent-soft: #dbeafe;
   --on-accent: #ffffff;
   --ok: #16a34a;
   --ok-soft: #dcfce7;
@@ -26,7 +31,7 @@
   --danger: #dc2626;
   --danger-soft: #fee2e2;
 
-  /* type scale */
+  /* --- 構造(型スケール/余白/角丸/影): 共有。ここはブランドで上書きしない --- */
   --text-xs: 12px;
   --text-sm: 13px;
   --text-md: 15px;
@@ -35,7 +40,6 @@
   --text-2xl: 26px;
   --text-3xl: 32px;
 
-  /* spacing (4px base) / radius / shadow(indigo 寄りの影) */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -45,23 +49,23 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --shadow-sm: 0 1px 2px rgb(30 27 75 / 0.06);
-  --shadow-md: 0 4px 16px rgb(30 27 75 / 0.10);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 2px 8px rgb(0 0 0 / 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f0f18;
-    --surface: #181826;
-    --surface-2: #1f2032;
-    --border: #2b2c40;
-    --border-strong: #3b3d57;
-    --text: #ecedf7;
-    --text-muted: #a2a4c0;
-    --text-faint: #6b6d88;
-    --accent: #8b8cff;
-    --accent-soft: #262752;
-    --on-accent: #0c0c16;
+    --bg: #111113;
+    --surface: #1b1b1f;
+    --surface-2: #232327;
+    --border: #2e2e33;
+    --border-strong: #3f3f46;
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --text-faint: #6b6b74;
+    --accent: #60a5fa;
+    --accent-soft: #1e3a5f;
+    --on-accent: #0b1220;
     --ok: #4ade80;
     --ok-soft: #16341f;
     --warn: #fbbf24;
@@ -69,7 +73,7 @@
     --danger: #f87171;
     --danger-soft: #3b1515;
     --shadow-sm: none;
-    --shadow-md: 0 4px 16px rgb(0 0 0 / 0.4);
+    --shadow-md: none;
   }
 }
 

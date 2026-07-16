@@ -24,6 +24,14 @@ description: このscaffold(webスタック)で画面を作る/直すときの�
 - ダークモードは tokens 側で自動追従する。画面側で分岐しない。
 - 新しい値が要るときは tokens に追加してから使う(1画面のための特例値を作らない)。
 
+### 色 = ブランドはアプリ所有(scaffold の既定に焼き込まない)
+- `tokens.css` は「構造(変数名・型スケール・余白・角丸・影)」+「中立プレースホルダの色値」。
+  UIの傾向・色は**プロジェクトごとに変わる好み**なので、**共有の scaffold 既定に自分のブランド色を入れない**。
+- アプリのブランド色は `src/lib/brand.css`(アプリ所有)を作り、色変数だけ上書きする
+  (`layout.tsx` で `tokens.css` の後に import)。widget/画面コードは無変更。
+- 統一感を出すコツ: **neutral(bg/surface/border/text)を accent の色相へ数%寄せる** → KB [[selection-design-pattern]]。
+- 迷ったら: 構造(スケール・widget挙動・フォームのカード等)は共有 tokens/widget、色値はアプリの brand.css。
+
 ### widget に委譲する
 - レイアウト/表示の構造は `src/lib/widgets.tsx` のコンポーネントで組む:
   `Page / Section / ListStack / ListRow / EmptyState / KVList / Badge / ProgressBar / Field / Button / ErrorText`
