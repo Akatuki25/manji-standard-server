@@ -106,6 +106,18 @@ cd <app>/web && docker compose up --build       # web(:3000)。NEXT_PUBLIC_API_B
 - web スタックは **design tokens(`src/lib/tokens.css`)+ widgets(`src/lib/widgets.tsx`)** を同梱しており、
   生成UIは widget に委譲する構造。**見た目の変更は widget/tokens 側で行い、生成物を手で触らない**。
 - 画面を作る/直すときの規約は `.claude/skills/frontend-design/`(アプリへコピーして使う)。
+- **色 = ブランドはアプリ所有(scaffold の既定に焼き込まない)**。`tokens.css` は「構造(変数名・型スケール・
+  余白・角丸・影)」+「**中立プレースホルダの色値**」。UI の傾向・色はプロジェクトごとに変わるので、
+  **アプリ側に `src/lib/brand.css` を置き、色変数(`--bg/--surface/--text/--accent/...`)だけ上書き**する
+  (`layout.tsx` で `tokens.css` の後に `brand.css` を import)。widget/画面コードは色を変えても無変更。
+  例(dev-atlas は indigo ブランド):
+  ```css
+  /* src/lib/brand.css — このアプリのブランド色。tokens.css の色値を上書き */
+  :root { --accent:#4f46e5; --accent-soft:#e8e7fc; --bg:#f7f8fc; --surface-2:#f0f1f8;
+          --border:#e3e5f0; --text:#1c1d2b; /* … neutral を accent 色相へ寄せると統一感 */ }
+  @media (prefers-color-scheme: dark){ :root{ --accent:#8b8cff; --bg:#0f0f18; /* … */ } }
+  ```
+  → 構造(共有)と色値(アプリ)の分離。standard-server の tokens.css は中立のまま、還流で上書きしない。
 - **生成でカバーできるデザインの境界に注意**: proto アノテーション(`@list/@label/@form`)が決められるのは
   「何をどの強弱で出すか」という**構造まで**。生成 CRUD 画面は管理画面グレードと割り切る。
   アプリの顔になる業務固有画面(ダッシュボード・hub 等)の**画面設計そのものは手書きの仕事**

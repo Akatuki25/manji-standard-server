@@ -7,18 +7,27 @@ import Link from "next/link";
 
 /* ---------- layout ---------- */
 
-export function Page({ title, crumb, actions, children }: {
-  title: string; crumb?: ReactNode; actions?: ReactNode; children: ReactNode;
+// シェル(サイドバー)内で使う想定 = 中央寄せせず左揃えで幅を使う。
+// title は大きく、その下に description(概要)を置ける。
+export function Page({ title, description, crumb, actions, children }: {
+  title: string; description?: ReactNode; crumb?: ReactNode; actions?: ReactNode; children: ReactNode;
 }): ReactElement {
   return (
-    <main style={{ maxWidth: 760, margin: "0 auto", padding: "var(--sp-5) var(--sp-4)" }}>
-      {crumb && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-faint)", marginBottom: "var(--sp-1)" }}>{crumb}</div>}
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "var(--sp-3)", marginBottom: "var(--sp-4)" }}>
-        <h1 style={{ margin: 0, fontSize: "var(--text-xl)" }}>{title}</h1>
-        {actions && <div style={{ display: "flex", gap: "var(--sp-2)" }}>{actions}</div>}
-      </div>
+    <div style={{ maxWidth: 1120, padding: "var(--sp-6)" }}>
+      {crumb && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-faint)", marginBottom: "var(--sp-2)" }}>{crumb}</div>}
+      <header style={{ marginBottom: "var(--sp-5)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "var(--sp-3)" }}>
+          <h1 style={{ margin: 0, fontSize: "var(--text-3xl)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>{title}</h1>
+          {actions && <div style={{ display: "flex", gap: "var(--sp-2)", flexShrink: 0 }}>{actions}</div>}
+        </div>
+        {description && (
+          <p style={{ color: "var(--text-muted)", fontSize: "var(--text-md)", marginTop: "var(--sp-2)", marginBottom: 0, maxWidth: 680 }}>
+            {description}
+          </p>
+        )}
+      </header>
       {children}
-    </main>
+    </div>
   );
 }
 

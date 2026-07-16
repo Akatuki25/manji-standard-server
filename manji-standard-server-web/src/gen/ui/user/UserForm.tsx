@@ -31,11 +31,14 @@ export function UserForm({ id }: { id?: string }) {
     router.refresh();
   }
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "var(--sp-3)", maxWidth: 400 }}>
+    <form onSubmit={submit} style={{ display: "grid", gap: "var(--sp-4)", maxWidth: 520, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)", padding: "var(--sp-5)" }}>
       <Field label="Email" type="email" value={email} onChange={set_email} />
       <Field label="Name" type="text" value={name} onChange={set_name} />
       {error && <ErrorText>{error}</ErrorText>}
-      <div><Button type="submit" variant="primary">{id ? "Update" : "Create"}</Button></div>
+      <div style={{ display: "flex", gap: "var(--sp-2)" }}>
+        <Button type="submit" variant="primary">{id ? "Update" : "Create"}</Button>
+        <Button variant="ghost" onClick={() => router.push("/users")}>Cancel</Button>
+      </div>
     </form>
   );
 }
