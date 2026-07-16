@@ -111,6 +111,12 @@ def _alter_sql(table: str, prev: dict, curr: dict) -> str | None:
             if cc[n]["sql_type"] != pc[n]["sql_type"]:
                 stmts.append(f'-- WARNING: type change on "{n}" ({pc[n]["sql_type"]} -> {cc[n]["sql_type"]})')
                 stmts.append(f'ALTER TABLE "{table}" ALTER COLUMN "{n}" TYPE {cc[n]["sql_type"]};')
+            if cc[n]["not_null"] != pc[n]["not_null"] and not cc[n]["primary_key"]:
+                if cc[n]["not_null"]:
+                    stmts.append(f'-- WARNING: SET NOT NULL on "{n}" fails if existing rows have NULL')
+                    stmts.append(f'ALTER TABLE "{table}" ALTER COLUMN "{n}" SET NOT NULL;')
+                else:
+                    stmts.append(f'ALTER TABLE "{table}" ALTER COLUMN "{n}" DROP NOT NULL;')
     if not stmts:
         return None
     return f"-- alter table {table}\n" + "\n".join(stmts) + "\n"

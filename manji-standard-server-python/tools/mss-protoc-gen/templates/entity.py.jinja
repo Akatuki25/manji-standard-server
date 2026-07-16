@@ -10,7 +10,7 @@ class {{ entity.name }}(Base):
     __tablename__ = "{{ entity.table }}"
 
 {% for f in entity.fields %}
-    {{ f.entity_attr }}: Mapped[{{ f.py_type }}] = mapped_column({{ f.sql_type }}{% if f.is_pk %}, primary_key=True{% endif %}{% if 'unique' in f.annotations %}, unique=True{% endif %}{% if not f.is_pk %}, nullable=False{% endif %})
+    {{ f.entity_attr }}: Mapped[{{ f.py_type }}] = mapped_column({{ f.sql_type }}{% if f.is_pk %}, primary_key=True{% endif %}{% if 'unique' in f.annotations %}, unique=True{% endif %}{% if not f.is_pk %}, nullable={{ "True" if f.nullable else "False" }}{% endif %})
 {% endfor %}
 
     @classmethod
