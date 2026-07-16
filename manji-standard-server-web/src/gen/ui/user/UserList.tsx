@@ -5,24 +5,20 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { listUsers } from "../../client/user";
 import type { User } from "../../types/user";
+import { ListStack, ListRow, EmptyState } from "../../../lib/widgets";
 
-// 優先度カードリスト(全列テーブルにしない): primary を突出、secondary を従属。
+// 優先度カードリスト(全列テーブルにしない): primary を突出、secondary を従属。見た目は widget に委譲。
 export function UserList() {
   const [rows, setRows] = useState<User[]>([]);
   useEffect(() => { listUsers().then(setRows).catch(() => setRows([])); }, []);
+  if (rows.length === 0) {
+    return <EmptyState message="No users yet" action={<Link href="/users/new">+ New</Link>} />;
+  }
   return (
-    <div>
-      <Link href="/users/new">+ New</Link>
-      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8, marginTop: 12 }}>
-        {rows.map((r) => (
-          <li key={r.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <Link href={`/users/${r.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{r.email}</div>
-              <div style={{ color: "#666", fontSize: 13 }}>{r.id} <span> · </span> {new Date(r.created_at_unix * 1000).toLocaleDateString()}</div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ListStack>
+      {rows.map((r) => (
+        <ListRow key={r.id} href={`/users/${r.id}`} primary={<>{r.email}</>} secondary={<>{r.id} <span> · </span> {new Date(r.created_at_unix * 1000).toLocaleDateString()}</>} />
+      ))}
+    </ListStack>
   );
 }

@@ -143,24 +143,27 @@ function tplList(ent) {
   const pk = metas.find((m) => m.isPk) || metas[0];
   const primary = metas.find((m) => m.listRole === "primary") || metas[0];
   const secondary = metas.filter((m) => m.listRole === "secondary" && m !== primary);
+  const secondaryJsx = secondary.length
+    ? " secondary={<>" + secondary.map((m) => displayCell(m, "r")).join(" <span> · </span> ") + "</>}"
+    : "";
   const L = [HEADER, '"use client";', 'import { useEffect, useState } from "react";', 'import Link from "next/link";',
-    'import { list' + E + 's } from "../../client/' + s + '";', 'import type { ' + E + ' } from "../../types/' + s + '";\n',
-    "// 優先度カードリスト(全列テーブルにしない): primary を突出、secondary を従属。",
+    'import { list' + E + 's } from "../../client/' + s + '";', 'import type { ' + E + ' } from "../../types/' + s + '";',
+    'import { ListStack, ListRow, EmptyState } from "../../../lib/widgets";\n',
+    "// 優先度カードリスト(全列テーブルにしない): primary を突出、secondary を従属。見た目は widget に委譲。",
     "export function " + E + "List() {",
     "  const [rows, setRows] = useState<" + E + "[]>([]);",
     "  useEffect(() => { list" + E + "s().then(setRows).catch(() => setRows([])); }, []);",
+    "  if (rows.length === 0) {",
+    '    return <EmptyState message="No ' + s + 's yet" action={<Link href="/' + s + 's/new">+ New</Link>} />;',
+    "  }",
     "  return (",
-    "    <div>",
-    '      <Link href="/' + s + 's/new">+ New</Link>',
-    '      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8, marginTop: 12 }}>',
-    "        {rows.map((r) => (",
-    '          <li key={r.' + pk.name + '} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>',
-    '            <Link href={`/' + s + 's/${r.' + pk.name + '}`} style={{ textDecoration: "none", color: "inherit" }}>',
-    '              <div style={{ fontWeight: 700, fontSize: 16 }}>' + displayCell(primary, "r") + "</div>"];
-  if (secondary.length) {
-    L.push('              <div style={{ color: "#666", fontSize: 13 }}>' + secondary.map((m) => displayCell(m, "r")).join(' <span> · </span> ') + "</div>");
-  }
-  L.push("            </Link>", "          </li>", "        ))}", "      </ul>", "    </div>", "  );", "}\n");
+    "    <ListStack>",
+    "      {rows.map((r) => (",
+    "        <ListRow key={r." + pk.name + "} href={`/" + s + "s/${r." + pk.name + "}`} primary={<>" + displayCell(primary, "r") + "</>}" + secondaryJsx + " />",
+    "      ))}",
+    "    </ListStack>",
+    "  );",
+    "}\n"];
   return L.join("\n");
 }
 
@@ -170,26 +173,24 @@ function tplDetail(ent) {
   const pk = metas.find((m) => m.isPk) || metas[0];
   const primary = metas.find((m) => m.listRole === "primary") || metas[0];
   const rest = metas.filter((m) => m !== primary);
+  const kvItems = rest.map((m) => '{ k: "' + m.label + '", v: <>' + displayCell(m, "item") + "</> }").join(", ");
   const L = [HEADER, '"use client";', 'import { useEffect, useState } from "react";', 'import Link from "next/link";',
     'import { get' + E + ' } from "../../client/' + s + '";', 'import { ' + E + 'DeleteButton } from "./' + E + 'DeleteButton";',
-    'import type { ' + E + ' } from "../../types/' + s + '";\n',
-    "// 詳細: 本質(primary)を先に、残りは従属表示(progressive disclosure)。",
+    'import type { ' + E + ' } from "../../types/' + s + '";',
+    'import { KVList } from "../../../lib/widgets";\n',
+    "// 詳細: 本質(primary)を先に、残りは従属表示(progressive disclosure)。見た目は widget に委譲。",
     "export function " + E + "Detail({ id }: { id: string }) {",
     "  const [item, setItem] = useState<" + E + " | null>(null);",
     "  useEffect(() => { get" + E + "(id).then(setItem).catch(() => setItem(null)); }, [id]);",
-    "  if (!item) return <p>Loading…</p>;",
+    '  if (!item) return <p style={{ color: "var(--text-faint)" }}>Loading…</p>;',
     "  return (",
-    '    <div style={{ display: "grid", gap: 12 }}>',
-    '      <h2 style={{ margin: 0 }}>' + displayCell(primary, "item") + "</h2>",
-    '      <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", color: "#444" }}>'];
-  for (const m of rest) {
-    L.push('        <dt style={{ color: "#888" }}>' + m.label + "</dt><dd style={{ margin: 0 }}>" + displayCell(m, "item") + "</dd>");
-  }
-  L.push('      </dl>',
-    '      <div style={{ display: "flex", gap: 12 }}>',
+    '    <div style={{ display: "grid", gap: "var(--sp-4)" }}>',
+    '      <h2 style={{ margin: 0, fontSize: "var(--text-lg)" }}>' + displayCell(primary, "item") + "</h2>",
+    "      <KVList items={[" + kvItems + "]} />",
+    '      <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "center" }}>',
     '        <Link href={`/' + s + 's/${id}/edit`}>Edit</Link>',
     "        <" + E + "DeleteButton id={id} />",
-    "      </div>", "    </div>", "  );", "}\n");
+    "      </div>", "    </div>", "  );", "}\n"];
   return L.join("\n");
 }
 
@@ -198,7 +199,7 @@ function tplForm(ent) {
   const editable = ent.fields.map(fieldMeta).filter((m) => m.editable);
   const L = [HEADER, '"use client";', 'import { useEffect, useState } from "react";', 'import { useRouter } from "next/navigation";',
     'import { create' + E + ', update' + E + ', get' + E + ' } from "../../client/' + s + '";',
-    'import { Field } from "../../../lib/widgets";\n',
+    'import { Field, Button, ErrorText } from "../../../lib/widgets";\n',
     "// 生成フォーム(create/edit): 編集可能フィールドのみ。validation は @required/@email から生成(entity検証と同源)。",
     "export function " + E + "Form({ id }: { id?: string }) {",
     "  const router = useRouter();"];
@@ -224,17 +225,18 @@ function tplForm(ent) {
   L.push("    router.refresh();");
   L.push("  }");
   L.push("  return (");
-  L.push('    <form onSubmit={submit} style={{ display: "grid", gap: 8, maxWidth: 360 }}>');
+  L.push('    <form onSubmit={submit} style={{ display: "grid", gap: "var(--sp-3)", maxWidth: 400 }}>');
   for (const m of editable) L.push('      <Field label="' + m.label + '" type="' + m.widget + '" value={' + m.name + "} onChange={set_" + m.name + "} />");
-  L.push('      {error && <div style={{ color: "crimson", fontSize: 13 }}>{error}</div>}');
-  L.push('      <button type="submit">{id ? "Update" : "Create"}</button>');
+  L.push("      {error && <ErrorText>{error}</ErrorText>}");
+  L.push('      <div><Button type="submit" variant="primary">{id ? "Update" : "Create"}</Button></div>');
   L.push("    </form>", "  );", "}\n");
   return L.join("\n");
 }
 
 function tplDelete(ent) {
   const E = ent.name, s = snake(E);
-  return [HEADER, '"use client";', 'import { useRouter } from "next/navigation";', 'import { delete' + E + ' } from "../../client/' + s + '";\n',
+  return [HEADER, '"use client";', 'import { useRouter } from "next/navigation";', 'import { delete' + E + ' } from "../../client/' + s + '";',
+    'import { Button } from "../../../lib/widgets";\n',
     "export function " + E + "DeleteButton({ id }: { id: string }) {",
     "  const router = useRouter();",
     "  async function onDelete() {",
@@ -243,33 +245,38 @@ function tplDelete(ent) {
     '    router.push("/' + s + 's");',
     "    router.refresh();",
     "  }",
-    '  return <button type="button" onClick={onDelete} style={{ color: "crimson" }}>Delete</button>;',
+    '  return <Button variant="danger" onClick={onDelete}>Delete</Button>;',
     "}\n"].join("\n");
 }
 
-// pages (server components rendering client components)
+// pages (server components rendering client components) — レイアウト/見出しは Page widget に委譲
 function pageList(E, s) {
-  return [HEADER, 'import { ' + E + 'List } from "../../gen/ui/' + s + '/' + E + 'List";\n',
+  return [HEADER, 'import Link from "next/link";',
+    'import { ' + E + 'List } from "../../gen/ui/' + s + '/' + E + 'List";',
+    'import { Page } from "../../lib/widgets";\n',
     "export default function " + E + "sPage() {",
-    '  return (<main style={{ maxWidth: 640, margin: "2rem auto", fontFamily: "system-ui" }}><h1>' + E + 's</h1><' + E + 'List /></main>);',
+    '  return (<Page title="' + E + 's" actions={<Link href="/' + s + 's/new">+ New</Link>}><' + E + 'List /></Page>);',
     "}\n"].join("\n");
 }
 function pageNew(E, s) {
-  return [HEADER, 'import { ' + E + 'Form } from "../../../gen/ui/' + s + '/' + E + 'Form";\n',
+  return [HEADER, 'import { ' + E + 'Form } from "../../../gen/ui/' + s + '/' + E + 'Form";',
+    'import { Page } from "../../../lib/widgets";\n',
     "export default function New" + E + "Page() {",
-    '  return (<main style={{ maxWidth: 640, margin: "2rem auto", fontFamily: "system-ui" }}><h1>New ' + E + '</h1><' + E + 'Form /></main>);',
+    '  return (<Page title="New ' + E + '"><' + E + 'Form /></Page>);',
     "}\n"].join("\n");
 }
 function pageDetail(E, s) {
-  return [HEADER, 'import { ' + E + 'Detail } from "../../../gen/ui/' + s + '/' + E + 'Detail";\n',
+  return [HEADER, 'import { ' + E + 'Detail } from "../../../gen/ui/' + s + '/' + E + 'Detail";',
+    'import { Page } from "../../../lib/widgets";\n',
     "export default function " + E + "DetailPage({ params }: { params: { id: string } }) {",
-    '  return (<main style={{ maxWidth: 640, margin: "2rem auto", fontFamily: "system-ui" }}><' + E + 'Detail id={params.id} /></main>);',
+    '  return (<Page title="' + E + '"><' + E + 'Detail id={params.id} /></Page>);',
     "}\n"].join("\n");
 }
 function pageEdit(E, s) {
-  return [HEADER, 'import { ' + E + 'Form } from "../../../../gen/ui/' + s + '/' + E + 'Form";\n',
+  return [HEADER, 'import { ' + E + 'Form } from "../../../../gen/ui/' + s + '/' + E + 'Form";',
+    'import { Page } from "../../../../lib/widgets";\n',
     "export default function Edit" + E + "Page({ params }: { params: { id: string } }) {",
-    '  return (<main style={{ maxWidth: 640, margin: "2rem auto", fontFamily: "system-ui" }}><h1>Edit ' + E + '</h1><' + E + 'Form id={params.id} /></main>);',
+    '  return (<Page title="Edit ' + E + '"><' + E + 'Form id={params.id} /></Page>);',
     "}\n"].join("\n");
 }
 
