@@ -98,6 +98,26 @@ cd <app>/web && docker compose up --build       # web(:3000)。NEXT_PUBLIC_API_B
 - web スタックは **design tokens(`src/lib/tokens.css`)+ widgets(`src/lib/widgets.tsx`)** を同梱しており、
   生成UIは widget に委譲する構造。**見た目の変更は widget/tokens 側で行い、生成物を手で触らない**。
 - 画面を作る/直すときの規約は `.claude/skills/frontend-design/`(アプリへコピーして使う)。
+- **生成でカバーできるデザインの境界に注意**: proto アノテーション(`@list/@label/@form`)が決められるのは
+  「何をどの強弱で出すか」という**構造まで**。生成 CRUD 画面は管理画面グレードと割り切る。
+  アプリの顔になる業務固有画面(ダッシュボード・hub 等)の**画面設計そのものは手書きの仕事**
+  (widgets/tokens の上に組む)。両者を混同して生成画面に画面設計を求めない。
+
+### 8. 横断関心(認証・ロギング等)と生成コードの関係
+
+ライブラリ依存の横断機能は、**生成物に一切触れず、seam(継ぎ目)にのみ実装する**:
+
+| seam | 役割 | 例 |
+|---|---|---|
+| backend `app/main.py`(組立) | ASGI middleware の追加 | 認証検証・CORS・ロギング |
+| web `src/lib/api.ts` | 全生成 client の共通口 | Authorization 付与・エラー処理 |
+| web `src/middleware.ts` | 全ページの横断ゲート | 未ログインのリダイレクト |
+
+- 生成 handler / 生成 client に Depends やヘッダ処理を**書き足さない**(再生成で消える・ドリフトする)。
+- seam で表現できない要求(エンドポイント個別の権限等)が出たら、**proto アノテーション
+  (例: `@auth role`)を定義して生成器を拡張する** — 契約駆動に寄せる。アプリ側での生成物パッチは禁止。
+
+### 9. CI を移植する
 
 ### 8. CI を移植する
 
