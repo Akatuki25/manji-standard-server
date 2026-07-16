@@ -3,13 +3,13 @@
     "users": {
       "columns": {
         "created_at": {
-          "not_null": true,
+          "not_null": false,
           "primary_key": false,
           "sql_type": "timestamptz",
           "unique": false
         },
         "email": {
-          "not_null": true,
+          "not_null": false,
           "primary_key": false,
           "sql_type": "text",
           "unique": true
