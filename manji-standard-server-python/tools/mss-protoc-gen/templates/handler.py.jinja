@@ -26,6 +26,10 @@ class {{ r.name }}Body(BaseModel):
 
 {% endfor %}
 def new_{{ snake }}_router(uc: {{ service.name }}Usecase) -> APIRouter:
+{% if entity.is_owned %}
+    # @owned: principal はアプリ横断の TenancyMiddleware が owner_scope で張る
+    # (Depends/threadpool 跨ぎでは contextvar が届かないため router では設定しない)。
+{% endif %}
     router = APIRouter()
 {% for r in rpcs %}
 

@@ -96,6 +96,19 @@ class Message:
         return "entity" in self.annotations
 
     @property
+    def is_owned(self) -> bool:
+        """@owned: 行をログインユーザー(principal)ごとに分離するマルチテナント entity。
+        owner_email 列を合成し、生成 repo の全クエリを principal で絞る(横断関心の seam 注入)。"""
+        return "owned" in self.annotations
+
+    @property
+    def owner_col(self) -> str:
+        """所有者列名。`@owned col=user_id` で上書き可(既定 owner_email)。"""
+        v = self.annotations.get("owned", "")
+        m = re.search(r"col=(\S+)", v)
+        return m.group(1) if m else "owner_email"
+
+    @property
     def table(self) -> str:
         v = self.annotations.get("entity", "")
         m = re.search(r"table=(\S+)", v)

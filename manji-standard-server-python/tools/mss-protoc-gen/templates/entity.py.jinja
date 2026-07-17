@@ -12,6 +12,10 @@ class {{ entity.name }}(Base):
 {% for f in entity.fields %}
     {{ f.entity_attr }}: Mapped[{{ f.py_type }}] = mapped_column({{ f.sql_type }}{% if f.is_pk %}, primary_key=True{% endif %}{% if 'unique' in f.annotations %}, unique=True{% endif %}{% if not f.is_pk %}, nullable={{ "True" if f.nullable else "False" }}{% endif %})
 {% endfor %}
+{% if entity.is_owned %}
+    # @owned: 所有者(principal)。クライアントは触れず、repo が current_owner() で自動充填/絞り込みする。
+    {{ entity.owner_col }}: Mapped[str | None] = mapped_column(String(255), nullable=True)
+{% endif %}
 
     @classmethod
     def new(cls{% for f in entity.fields %}, {{ f.entity_attr }}: {{ f.py_type }}{% endfor %}) -> "{{ entity.name }}":

@@ -4,6 +4,9 @@ from sqlalchemy import select, delete as sql_delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from app.infra.db import tx
+{% if entity.is_owned %}
+from app.infra.tenancy import current_owner
+{% endif %}
 from app.domain.entity.{{ snake }} import {{ entity.name }}
 from app.domain.repository.{{ snake }}_repository import (
     {{ entity.name }}NotFoundError,
@@ -12,24 +15,40 @@ from app.domain.repository.{{ snake }}_repository import (
 
 {% set E = entity.name %}
 {% set pk = entity.pk() %}
+{% set OWN = entity.owner_col %}
 {% set cols = entity.fields | map(attribute='entity_attr') | list %}
 
 class Postgres{{ E }}Repository:
+{% if entity.is_owned %}
+    # @owned: 全クエリを principal({{ OWN }})で絞り、他テナントの行に触れさせない(横断seam)。
+{% endif %}
     def select_all(self) -> list[{{ E }}]:
-        return list(tx.session().scalars(select({{ E }})).all())
+        q = select({{ E }})
+{% if entity.is_owned %}
+        q = q.where({{ E }}.{{ OWN }} == current_owner())
+{% endif %}
+        return list(tx.session().scalars(q).all())
 
     def select_by_pk(self, {{ pk.name }}) -> {{ E }} | None:
+{% if entity.is_owned %}
+        q = select({{ E }}).where({{ E }}.{{ pk.entity_attr }} == {{ pk.name }}, {{ E }}.{{ OWN }} == current_owner())
+        return tx.session().scalars(q).first()
+{% else %}
         return tx.session().get({{ E }}, {{ pk.name }})
+{% endif %}
 {% for u in entity.unique_fields %}
 
     def select_by_{{ u.name }}(self, {{ u.name }}) -> {{ E }} | None:
         return tx.session().scalars(
-            select({{ E }}).where({{ E }}.{{ u.entity_attr }} == {{ u.name }})
+            select({{ E }}).where({{ E }}.{{ u.entity_attr }} == {{ u.name }}{% if entity.is_owned %}, {{ E }}.{{ OWN }} == current_owner(){% endif %})
         ).first()
 {% endfor %}
 
     def insert(self, e: {{ E }}) -> None:
         s = tx.session()
+{% if entity.is_owned %}
+        e.{{ OWN }} = current_owner()
+{% endif %}
         s.add(e)
         try:
             s.flush()
@@ -40,6 +59,11 @@ class Postgres{{ E }}Repository:
         if not es:
             return
         s = tx.session()
+{% if entity.is_owned %}
+        _owner = current_owner()
+        for e in es:
+            e.{{ OWN }} = _owner
+{% endif %}
         s.add_all(es)
         try:
             s.flush()
@@ -54,17 +78,31 @@ class Postgres{{ E }}Repository:
             self._upsert(es)
 
     def _upsert(self, es: list[{{ E }}]) -> None:
-        cols = {{ cols }}
+        cols = {{ cols }}{% if entity.is_owned %} + ["{{ OWN }}"]{% endif %}
+
+{% if entity.is_owned %}
+        _owner = current_owner()
+        for e in es:
+            e.{{ OWN }} = _owner
+{% endif %}
         vals = [{c: getattr(e, c) for c in cols} for e in es]
         stmt = pg_insert({{ E }}).values(vals)
         upd = {c: getattr(stmt.excluded, c) for c in cols if c != "{{ pk.entity_attr }}"}
-        tx.session().execute(
-            stmt.on_conflict_do_update(index_elements=["{{ pk.entity_attr }}"], set_=upd)
-        )
+{% if entity.is_owned %}
+        # 他テナントの行を上書きしない(pk衝突でも owner 不一致なら更新対象外にする conflict 条件)
+        stmt = stmt.on_conflict_do_update(index_elements=["{{ pk.entity_attr }}"], set_=upd, where=({{ E }}.{{ OWN }} == _owner))
+{% else %}
+        stmt = stmt.on_conflict_do_update(index_elements=["{{ pk.entity_attr }}"], set_=upd)
+{% endif %}
+        tx.session().execute(stmt)
 
     def update(self, e: {{ E }}) -> None:
         s = tx.session()
+{% if entity.is_owned %}
+        obj = s.scalars(select({{ E }}).where({{ E }}.{{ pk.entity_attr }} == e.{{ pk.entity_attr }}, {{ E }}.{{ OWN }} == current_owner())).first()
+{% else %}
         obj = s.get({{ E }}, e.{{ pk.entity_attr }})
+{% endif %}
         if obj is None:
             raise {{ E }}NotFoundError()
 {% for f in entity.fields %}
@@ -76,7 +114,11 @@ class Postgres{{ E }}Repository:
 
     def delete(self, {{ pk.name }}) -> None:
         s = tx.session()
+{% if entity.is_owned %}
+        obj = s.scalars(select({{ E }}).where({{ E }}.{{ pk.entity_attr }} == {{ pk.name }}, {{ E }}.{{ OWN }} == current_owner())).first()
+{% else %}
         obj = s.get({{ E }}, {{ pk.name }})
+{% endif %}
         if obj is None:
             raise {{ E }}NotFoundError()
         s.delete(obj)
@@ -85,16 +127,20 @@ class Postgres{{ E }}Repository:
     def bulk_delete(self, ids) -> None:
         if not ids:
             return
-        res = tx.session().execute(sql_delete({{ E }}).where({{ E }}.{{ pk.entity_attr }}.in_(ids)))
+        stmt = sql_delete({{ E }}).where({{ E }}.{{ pk.entity_attr }}.in_(ids){% if entity.is_owned %}, {{ E }}.{{ OWN }} == current_owner(){% endif %})
+        res = tx.session().execute(stmt)
         if res.rowcount != len(ids):
             raise {{ E }}NotFoundError()
 
     def delete_all(self) -> None:
-        tx.session().execute(sql_delete({{ E }}))
+        tx.session().execute(sql_delete({{ E }}){% if entity.is_owned %}.where({{ E }}.{{ OWN }} == current_owner()){% endif %})
 {% if entity.paging_field %}
 
     def select_by_cursor(self, limit, after) -> list[{{ E }}]:
         q = select({{ E }}).order_by({{ E }}.{{ entity.paging_field.entity_attr }}).limit(limit)
+{% if entity.is_owned %}
+        q = q.where({{ E }}.{{ OWN }} == current_owner())
+{% endif %}
         if after is not None:
             q = q.where({{ E }}.{{ entity.paging_field.entity_attr }} > after)
         return list(tx.session().scalars(q).all())
