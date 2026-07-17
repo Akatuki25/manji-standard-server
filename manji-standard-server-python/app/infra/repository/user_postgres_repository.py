@@ -13,7 +13,8 @@ from app.domain.repository.user_repository import (
 
 class PostgresUserRepository:
     def select_all(self) -> list[User]:
-        return list(tx.session().scalars(select(User)).all())
+        q = select(User)
+        return list(tx.session().scalars(q).all())
 
     def select_by_pk(self, id) -> User | None:
         return tx.session().get(User, id)
@@ -53,9 +54,8 @@ class PostgresUserRepository:
         vals = [{c: getattr(e, c) for c in cols} for e in es]
         stmt = pg_insert(User).values(vals)
         upd = {c: getattr(stmt.excluded, c) for c in cols if c != "id"}
-        tx.session().execute(
-            stmt.on_conflict_do_update(index_elements=["id"], set_=upd)
-        )
+        stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=upd)
+        tx.session().execute(stmt)
 
     def update(self, e: User) -> None:
         s = tx.session()
@@ -78,7 +78,8 @@ class PostgresUserRepository:
     def bulk_delete(self, ids) -> None:
         if not ids:
             return
-        res = tx.session().execute(sql_delete(User).where(User.id.in_(ids)))
+        stmt = sql_delete(User).where(User.id.in_(ids))
+        res = tx.session().execute(stmt)
         if res.rowcount != len(ids):
             raise UserNotFoundError()
 
