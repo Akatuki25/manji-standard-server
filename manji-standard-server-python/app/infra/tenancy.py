@@ -3,21 +3,22 @@
 `@owned` entity は生成 repo が `current_owner()` を呼び、全クエリを所有者で絞る。
 その所有者(principal)を「どう決めるか」は横断関心なのでここに閉じ込める:
 
-- HTTP: 生成された handler の owned router が `Depends(require_owner)` を持ち、
-  リクエスト文脈(=endpoint と同じ task)で contextvar をセットする。
-  → BaseHTTPMiddleware の dispatch で contextvar を張ると endpoint に伝播しない罠を回避。
+- HTTP: アプリ横断の **TenancyMiddleware(pure-ASGI)** が各リクエストを
+  `owner_scope(principal)` で包む。**同一タスクで contextvar を張る**ので、
+  FastAPI が sync endpoint を threadpool に投げても context がコピーされ伝播する。
+  → BaseHTTPMiddleware.dispatch や Depends(=threadpool 別コンテキスト)で
+    contextvar を張ると endpoint に届かない罠を、pure-ASGI で回避する。
 - 非HTTP(MCP/CLI/バッチ): `with owner_scope(email): ...` で明示的に張る。
 
-principal の“出所”は auth 実装依存なので、規約として **middleware が
-`request.state.principal_email` を入れておく**ことにし、ここはそれを読むだけにする
-(auth の詳細=JWT検証などを tenancy に持ち込まない)。未設定なら DEV_OWNER_EMAIL。
+principal の“出所”は auth 実装依存なので、TenancyMiddleware には解決関数を注入する
+(auth の詳細=JWT検証などを tenancy に持ち込まない)。未設定なら DEV_OWNER。
 """
 from __future__ import annotations
 
 import contextvars
 import os
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 # ローカル/認証オフ時の既定所有者。全行がこの owner になる(単一テナント相当)。
 DEV_OWNER = os.environ.get("DEV_OWNER_EMAIL", "local@dev")
@@ -53,12 +54,25 @@ def owner_scope(email: str) -> Iterator[None]:
         _owner.reset(token)
 
 
-def require_owner(request) -> str:  # FastAPI が Request を注入(型注釈は循環回避のため省略)
-    """owned router の依存。principal を解決し contextvar に載せて返す。
+class TenancyMiddleware:
+    """pure-ASGI: 各 HTTP リクエストを principal で owner_scope する横断 middleware。
 
-    規約: 認証 middleware が `request.state.principal_email` を入れておく。
-    未認証(AUTH_MODE=off 等)は DEV_OWNER にフォールバックしローカル開発を壊さない。
+    resolve(scope) が principal(email)を返す(未解決なら DEV_OWNER)。JWT 検証など
+    auth 詳細は resolve 側(アプリ)に置き、ここは contextvar を張るだけ。
+    pure-ASGI ゆえ endpoint(threadpool)まで contextvar が伝播する。
     """
-    email = getattr(request.state, "principal_email", None) or DEV_OWNER
-    _owner.set(email)
-    return email
+
+    def __init__(self, app, resolve: Callable[[dict], str | None]) -> None:
+        self._app = app
+        self._resolve = resolve
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+        try:
+            owner = self._resolve(scope)
+        except Exception:
+            owner = None
+        with owner_scope(owner or DEV_OWNER):
+            await self._app(scope, receive, send)
